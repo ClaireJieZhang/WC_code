@@ -583,10 +583,68 @@ def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=Fal
     return results
 
 
+def run_sf_pipeline_with_loaded_data(
+    data_all,
+    svar_all,
+    dataset_name,
+    k_min=4,
+    k_max=15,
+    num_iters=10,
+    best_out_of=10,
+    verbose=False
+):
+    """
+    Run Fair-Lloyd pipeline using pre-loaded data and group labels.
+    Saves results as in original run_pipeline.
+    """
+    data_normalized = normalize_data(data_all)
+    results = defaultdict(dict)
 
+    for k in range(k_min, k_max + 1):
+        if verbose:
+            print(f"\n=== k = {k} ===")
+
+        rand_centers, _, _ = give_rand_centers(
+            data_normalized, data_normalized, data_normalized, k, best_out_of
+        )
+
+        centers, clustering, runtime = lloyd(
+            data_normalized, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=0, verbose=verbose
+        )
+        cost = comp_cost(data_normalized, svar_all, k, clustering, is_fair=0)
+
+        centers_f, clustering_f, runtime_f = lloyd(
+            data_normalized, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=1, verbose=verbose
+        )
+        cost_f = comp_cost(
+            [data_normalized[svar_all == 1], data_normalized[svar_all == 2]],
+            svar_all, k, clustering_f, is_fair=1
+        )
+
+        results[k]['centers'] = centers
+        results[k]['clustering'] = clustering
+        results[k]['runtime'] = runtime
+        results[k]['cost'] = cost
+
+        results[k]['centers_f'] = centers_f
+        results[k]['clustering_f'] = clustering_f
+        results[k]['runtime_f'] = runtime_f
+        results[k]['cost_f'] = cost_f
+
+    os.makedirs("results", exist_ok=True)
+    out_path = f"results/{dataset_name}_k{k_min}-{k_max}_results.pkl"
+    with open(out_path, "wb") as f:
+        pickle.dump(results, f)
+
+    print(f"\n✅ Results saved to: {out_path}")
+    return results
 
 
 if __name__ == "__main__":
+    import argparse
+    import os
+    from evaluation_utils.data_utils import load_data
+
     parser = argparse.ArgumentParser(description="Run Fair-Lloyd clustering pipeline.")
     parser.add_argument("--dataset", type=str, default="adult", choices=["adult", "credit", "LFW", "compasWB"],
                         help="Dataset name to use.")
@@ -595,14 +653,31 @@ if __name__ == "__main__":
     parser.add_argument("--iters", type=int, default=10, help="Number of Lloyd iterations.")
     parser.add_argument("--best_out_of", type=int, default=10, help="Number of random initializations to try.")
     parser.add_argument("--verbose", action="store_true", help="Print detailed progress logs.")
+    parser.add_argument("--use_preloaded_data", action="store_true",
+                        help="Use shared data loader from evaluation_utils instead of internal dataset loading.")
 
     args = parser.parse_args()
 
-    results = run_pipeline(
-        dataset_name=args.dataset,
-        k_min=args.k_min,
-        k_max=args.k_max,
-        num_iters=args.iters,
-        best_out_of=args.best_out_of,
-        verbose=args.verbose
-    )
+    if args.use_preloaded_data:
+        config_file = "configs/standard_run.ini"
+        data_matrix, group_labels, _, _ = load_data(config_file, dataset_name=args.dataset)
+
+        results = run_sf_pipeline_with_loaded_data(
+            data_all=data_matrix,
+            svar_all=group_labels,
+            dataset_name=args.dataset,
+            k_min=args.k_min,
+            k_max=args.k_max,
+            num_iters=args.iters,
+            best_out_of=args.best_out_of,
+            verbose=args.verbose
+        )
+    else:
+        results = run_pipeline(
+            dataset_name=args.dataset,
+            k_min=args.k_min,
+            k_max=args.k_max,
+            num_iters=args.iters,
+            best_out_of=args.best_out_of,
+            verbose=args.verbose
+        )

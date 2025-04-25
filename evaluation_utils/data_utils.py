@@ -3,99 +3,76 @@ import pandas as pd
 from sklearn.preprocessing import OrdinalEncoder
 import os
 import configparser
-from fairlearn.datasets import fetch_adult
+from evaluation_utils.utils import read_data, clean_data, scale_data
+
 
 def read_list(value):
     """Helper function to read comma-separated lists from config files."""
     return [item.strip() for item in value.split(',')]
 
-def load_adult_data(data_path=None, max_points=None):
-    """
-    Load and preprocess the adult dataset consistently.
-    
-    Args:
-        data_path: str, optional - Path to the adult.csv file. If None, uses fairlearn's fetch_adult.
-        max_points: int, optional - Maximum number of points to use. If None, use all.
-        
-    Returns:
-        data: numpy array - Preprocessed features
-        group_labels: numpy array - Group labels (1 for Female, 2 for Male)
-        group_names: list - Names of the groups
-    """
-    if data_path is None or not os.path.exists(data_path):
-        # Use fairlearn's fetch_adult if no path provided or file doesn't exist
-        X, y = fetch_adult(as_frame=True, return_X_y=True)
-        
-        # Drop rows with any missing entries
-        X_clean = X.replace('?', np.nan).dropna()
-        y_clean = y.loc[X_clean.index]
-        
-        # Extract sensitive attribute
-        sensitive = X_clean['sex']
-        X_clean = X_clean.drop(columns=['sex'])
-        
-        # Ordinal encode all features
-        enc = OrdinalEncoder()
-        X_encoded = enc.fit_transform(X_clean)
-        
-        # Convert sensitive attribute to binary (1 for Female, 2 for Male)
-        group_labels = (sensitive == 'Male').astype(int) + 1
-        group_names = ['Female', 'Male']
-        
-        data = X_encoded
-    else:
-        # Load from CSV file
-        df = pd.read_csv(data_path)
-        
-        # Extract sensitive attribute
-        sensitive = df['sex']
-        df = df.drop(columns=['sex'])
-        
-        # Handle missing values
-        df = df.replace('?', np.nan).dropna()
-        
-        # Ordinal encode all features
-        enc = OrdinalEncoder()
-        data = enc.fit_transform(df)
-        
-        # Convert sensitive attribute to binary (1 for Female, 2 for Male)
-        group_labels = (sensitive == 'Male').astype(int) + 1
-        group_names = ['Female', 'Male']
-    
-    # Subsample if needed
-    if max_points is not None and len(data) > max_points:
-        indices = np.random.choice(len(data), max_points, replace=False)
-        data = data[indices]
-        group_labels = group_labels[indices]
-    
-    return data, group_labels, group_names
 
-def load_data_from_config(config_file, dataset_name, max_points=None):
+
+def load_and_prepare_data(ini_path, dataset_name, max_points=None, ml_model_flag=False, p_acc=1.0):
     """
-    Load data using a config file (for compatibility with existing pipelines).
-    
-    Args:
-        config_file: str - Path to the config file
-        dataset_name: str - Name of the dataset section in the config
-        max_points: int, optional - Maximum number of points to use
-        
+    Unified data loading for WC, FCBC, SF. Encodes group using eval conditions,
+    applies cleaning, column selection, and normalization.
+
     Returns:
-        data: numpy array - Preprocessed features
-        group_labels: numpy array - Group labels
-        group_names: list - Names of the groups
+        df_scaled: scaled DataFrame (without group col)
+        color_flag_array: np.ndarray (group labels 0/1)
+        df_full: full cleaned DataFrame (with group col)
+        group_names: list of original group names
     """
-    config = configparser.ConfigParser(converters={'list': read_list})
-    config.read(config_file)
-    
-    if dataset_name == 'adult':
-        # Use the common adult data loader
-        data_path = config[dataset_name].get('csv_file', None)
-        return load_adult_data(data_path, max_points)
-    
-    # For other datasets, implement similar loaders
-    # ...
-    
-    raise ValueError(f"Dataset {dataset_name} not supported in the common data loader yet")
+    config = configparser.ConfigParser(converters={"list": read_list})
+    config.read(ini_path)
+
+    # Step 1: Read and optionally subsample
+    df = read_data(config, dataset_name)
+    if max_points and len(df) > max_points:
+        df = df.head(max_points)
+
+    # Step 2: Assign group labels using condition logic
+    variable_of_interest = config[dataset_name].getlist("fairness_variable")
+    assert len(variable_of_interest) == 1
+    variable = variable_of_interest[0]
+    bucket_conditions = config[dataset_name].getlist(f"{variable}_conditions")
+
+    color_flag_array = np.zeros(len(df), dtype=int)
+    group_counts = [0 for _ in bucket_conditions]
+
+    for i, row in df.iterrows():
+        for bucket_idx, bucket in enumerate(bucket_conditions):
+            try:
+                if eval(bucket)(row[variable]):
+                    color_flag_array[i] = bucket_idx
+                    group_counts[bucket_idx] += 1
+                    break
+            except Exception as e:
+                raise RuntimeError(f"Error evaluating condition `{bucket}` on row {i}: {e}")
+
+    # Step 3: Clean data (categorical encoding)
+    df, _ = clean_data(df, config, dataset_name)
+
+    # Step 4: Select specified columns
+    selected_columns = config[dataset_name].getlist("columns")
+    df = df[selected_columns]
+
+    # Step 5: Optional scaling
+    if config["DEFAULT"].getboolean("scaling", fallback=True):
+        df = scale_data(df)
+
+    # Step 6: Optional group names
+    group_names_key = f"{variable}_group_names"
+    if group_names_key in config[dataset_name]:
+        group_names = config[dataset_name].getlist(group_names_key)
+    else:
+        group_names = [f"Group {i}" for i in range(len(bucket_conditions))]
+
+    print(f"[INFO] Group counts: {dict(enumerate(group_counts))}")
+    return df.to_numpy(), np.array(color_flag_array), df, group_names
+
+
+
 
 def normalize_data(data):
     """

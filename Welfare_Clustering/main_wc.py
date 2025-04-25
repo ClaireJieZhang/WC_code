@@ -15,6 +15,8 @@ from util.clusteringutil import (clean_data, read_data, scale_data,
 from util.results_util import save_clustering_results
 from collections import defaultdict
 import sys
+from evaluation_utils.data_utils import load_data
+
 
 def normalize_data(X):
     X_mean = X.mean(axis=0)
@@ -180,9 +182,75 @@ def run_full_pipeline(config_file, dataset_name, lambda_param=0.5, max_points=No
     return final_result
 
 
+def run_full_pipeline_with_loaded_data(df, svar_all, group_names, config_file, dataset_name, lambda_param=0.5):
+    """
+    Welfare Clustering pipeline using pre-loaded and pre-cleaned data.
+
+    Args:
+        df: pd.DataFrame — cleaned and scaled feature matrix
+        svar_all: np.ndarray — group labels (0/1)
+        group_names: list — string names of each group
+        config_file: str — path to .ini config
+        dataset_name: str — section name
+        lambda_param: float — LP lambda weight
+
+    Returns:
+        result: dict containing final rounded result
+    """
+  
+
+    config = configparser.ConfigParser(converters={'list': read_list})
+    config.read(config_file)
+
+    k = int(config["clustering"]["num_clusters"])
+    alpha_val = ast.literal_eval(config["params"]["alpha"])
+    beta_val = ast.literal_eval(config["params"]["beta"])
+
+    data_normalized = normalize_data(df.values)
+
+    # Diagnostics
+    unique, counts = np.unique(svar_all, return_counts=True)
+    total = len(svar_all)
+    print("\n[Diagnostics] Global group ratios:")
+    for u, c in zip(unique, counts):
+        print(f"Group {u}: count={c}, proportion={c/total:.3f}")
+
+    # Socially fair clustering
+    centers = socially_fair_kmeans(data_normalized, svar_all, k=k)
+
+    distance_matrix = cdist(data_normalized, centers, metric='sqeuclidean')
+
+    unique_groups = np.unique(svar_all)
+
+    alpha = alpha_val if isinstance(alpha_val, dict) else {h: alpha_val for h in unique_groups}
+    beta = beta_val if isinstance(beta_val, dict) else {h: beta_val for h in unique_groups}
+
+    df_normalized = pd.DataFrame(data_normalized)
+    lp_result = run_connector_and_solve_lp(df_normalized, svar_all, centers, alpha, beta, lambda_param)
+    lp_assignment = lp_result['x_frac']
+    lp_objective = lp_result['z']
+
+    final_result = rounding_wrapper(
+        lp_assignment=lp_assignment,
+        distance_matrix=distance_matrix,
+        color_labels=svar_all,
+        num_clusters=centers.shape[0],
+        num_colors=len(unique_groups),
+        lp_objective=lp_objective,
+        df=data_normalized,
+        centers=centers
+    )
+
+    final_result['group_names'] = group_names
+    return final_result
+
+
 
 if __name__ == "__main__":
-  
+    import configparser
+    import sys
+    from evaluation_utils.data_utils import load_data  # centralized loader
+
     # === Load outer (controller) config file ===
     outer_config_file = "config/my_experiment.ini"
     outer_config = configparser.ConfigParser(converters={'list': read_list})
@@ -196,26 +264,41 @@ if __name__ == "__main__":
     config_file = outer_config[config_str]["config_file"]
     lambda_param = float(outer_config[config_str].get("lambda_param", 0.5))
     max_points = outer_config[config_str].getint("max_points", fallback=None)
+    use_preloaded_data = outer_config[config_str].getboolean("use_preloaded_data", fallback=False)
 
-    # === Call the actual pipeline ===
-    result = run_full_pipeline(
-        config_file=config_file,
-        dataset_name=dataset_name,
-        lambda_param=lambda_param,
-        max_points=max_points
-    )
+    # === Choose pipeline execution path ===
+    if use_preloaded_data:
+        data_matrix, group_labels, df_clean, group_names = load_data(
+            config_file=config_file,
+            dataset_name=dataset_name,
+            max_points=max_points
+        )
+        result = run_full_pipeline_with_loaded_data(
+            df=df_clean,
+            svar_all=group_labels,
+            group_names=group_names,
+            config_file=config_file,
+            dataset_name=dataset_name,
+            lambda_param=lambda_param
+        )
+    else:
+        result = run_full_pipeline(
+            config_file=config_file,
+            dataset_name=dataset_name,
+            lambda_param=lambda_param,
+            max_points=max_points
+        )
 
     print("Rounded clustering objective:", result['objective'])
     print("Group proportions (normalized):", result['proportions_normalized'])
 
-    # === Save results ===
     config_params = {
         "dataset": dataset_name,
         "config_file": config_file,
         "lambda_param": lambda_param,
         "max_points": max_points
     }
-    
+
     save_clustering_results(
         result=result,
         config_params=config_params,
