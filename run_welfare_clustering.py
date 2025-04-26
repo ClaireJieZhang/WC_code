@@ -44,6 +44,16 @@ def run_welfare_clustering_for_k(cache_dir, config_file, k, lambda_param=0.5):
         config.add_section('clustering')
     config['clustering']['num_clusters'] = str(k)
     
+    # Ensure params section exists
+    if not config.has_section('params'):
+        config.add_section('params')
+    
+    # Set default alpha and beta if not present
+    if 'alpha' not in config['params']:
+        config['params']['alpha'] = str({0: lambda_param, 1: lambda_param})
+    if 'beta' not in config['params']:
+        config['params']['beta'] = str({0: lambda_param, 1: lambda_param})
+    
     # Write the updated config to a temporary file
     temp_config_file = os.path.join(cache_dir, f"temp_config_k{k}.ini")
     with open(temp_config_file, 'w') as f:
@@ -67,14 +77,55 @@ def run_welfare_clustering_for_k(cache_dir, config_file, k, lambda_param=0.5):
         lambda_param=lambda_param
     )
     
-    # Create a row for the results DataFrame
+    # Helper function to convert numpy arrays to lists
+    def to_list(value):
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        return value
+    
+    # Create a structured results dictionary
+    structured_results = {
+        'pipeline': 'Welfare_Clustering',
+        'dataset': 'cached_data',
+        'timestamp': pd.Timestamp.now().isoformat(),
+        'data': {
+            'points': data_matrix.tolist(),
+            'group_labels': group_labels.tolist(),
+            'group_names': group_names
+        },
+        'results': {
+            str(k): {
+                'standard': None,  # Welfare Clustering only does fair version
+                'fair': {
+                    'centers': to_list(results['centers']),
+                    'assignment': to_list(results['assignment']),
+                    'metrics': {
+                        'objective': float(results.get('objective', 0.0)),
+                        'runtime': results.get('runtime', None),
+                        'group_costs': to_list(results.get('group_costs', None)),
+                        'proportions_normalized': to_list(results.get('proportions_normalized', []))
+                    }
+                }
+            }
+        }
+    }
+    
+    # Save detailed results to JSON
+    detailed_file = os.path.join(results_dir, f"detailed_results_k{k}.json")
+    with open(detailed_file, 'w') as f:
+        json.dump(structured_results, f, indent=2)
+    print(f"Detailed results for k={k} saved to: {detailed_file}")
+    
+    # Create a row for the results DataFrame (without the large arrays)
     result_row = {
         'k': k,
         'lambda_param': lambda_param,
         'objective': float(results.get('objective', 0.0)),
         'runtime': results.get('runtime', None),
         'num_points': len(data_matrix),
-        'timestamp': pd.Timestamp.now().isoformat()
+        'timestamp': pd.Timestamp.now().isoformat(),
+        'alpha': config['params']['alpha'],
+        'beta': config['params']['beta']
     }
     
     # Add group-specific metrics if available

@@ -3,6 +3,8 @@ import sys
 import argparse
 import numpy as np
 import pandas as pd
+import pickle
+from datetime import datetime
 
 # Add the parent directory to the path so we can import from evaluation_utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -47,12 +49,43 @@ def run_socially_fair_experiment(cache_dir, k_min=4, k_max=8, num_iters=10, best
     results_dir = os.path.join(cache_dir, "socially_fair_results")
     os.makedirs(results_dir, exist_ok=True)
     
-    # Save results to a file
-    with open(os.path.join(results_dir, "results.txt"), "w") as f:
-        for k, result in results.items():
-            f.write(f"k={k}: {result}\n")
+    # Create a structured results dictionary
+    structured_results = {
+        'pipeline': 'SociallyFair_Python',
+        'dataset': 'cached_data',
+        'timestamp': datetime.now().isoformat(),
+        'data': {
+            'points': data_matrix.tolist(),
+            'group_labels': group_labels.tolist(),
+            'group_names': group_names
+        },
+        'results': {}
+    }
     
-    print(f"SociallyFair_Python results saved to {results_dir}")
+    # Process each k value's results
+    for k, result in results.items():
+        structured_results['results'][str(k)] = {
+            'standard': {
+                'centers': result['centers'].tolist(),
+                'assignment': result['clustering'].tolist(),
+                'runtime': result['runtime'],
+                'cost': result['cost'].tolist()
+            },
+            'fair': {
+                'centers': result['centers_f'].tolist(),
+                'assignment': result['clustering_f'][0].tolist(),  # Take first assignment
+                'runtime': result['runtime_f'],
+                'cost': result['cost_f'].tolist()
+            }
+        }
+    
+    # Save to pickle file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = os.path.join(results_dir, f"sf_results_{timestamp}.pkl")
+    with open(output_file, 'wb') as f:
+        pickle.dump(structured_results, f)
+    
+    print(f"SociallyFair_Python results saved to {output_file}")
 
 def main():
     parser = argparse.ArgumentParser(description="Run SociallyFair_Python experiment with cached data")

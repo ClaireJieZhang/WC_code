@@ -57,12 +57,16 @@ def run_fcbc_experiment(cache_dir, k_min=4, k_max=8, pof_min=1.001, pof_max=1.1,
                 # centers is already a list of lists, so we can use str directly
                 centers_str = str(output['centers'])
                 
-                # assignment might be a numpy array or list, so we handle both cases
-                assignment = output['assignment']
-                if isinstance(assignment, np.ndarray):
-                    # Reshape assignment to match data dimensions
-                    num_points = len(data_matrix)
-                    assignment = assignment[:num_points].astype(int)
+                # assignment is a flattened binary matrix of shape (num_points, num_clusters)
+                # where each row has exactly one 1 indicating cluster assignment
+                assignment = np.array(output['assignment'])
+                num_points = len(data_matrix)
+                num_clusters = k
+                # Reshape back to binary matrix and find cluster indices
+                assignment = assignment.reshape(num_points, num_clusters)
+                print(f"First row of reshaped assignment matrix: {assignment[0]}")
+                # Convert binary matrix to cluster indices (0 to k-1)
+                assignment = np.argmax(assignment, axis=1).astype(int)
                 assignment_str = str(assignment.tolist())
                 
                 result_row = {
