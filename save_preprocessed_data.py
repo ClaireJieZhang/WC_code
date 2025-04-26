@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
-from evaluation_utils.data_utils import load_data
+from evaluation_utils.data_utils import load_and_prepare_data
 
 def save_cached_data(config_file, dataset_name, cache_dir="cache", max_points=None):
     """
@@ -16,8 +16,8 @@ def save_cached_data(config_file, dataset_name, cache_dir="cache", max_points=No
     print(f"📦 Loading and caching data for dataset: {dataset_name}")
     os.makedirs(cache_dir, exist_ok=True)
 
-    data_matrix, group_labels, df_clean, group_names = load_data(
-        config_file=config_file,
+    data_matrix, group_labels, df_clean, group_names = load_and_prepare_data(
+        ini_path=config_file,
         dataset_name=dataset_name,
         max_points=max_points
     )

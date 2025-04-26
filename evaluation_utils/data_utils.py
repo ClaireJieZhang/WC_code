@@ -31,6 +31,13 @@ def load_and_prepare_data(ini_path, dataset_name, max_points=None, ml_model_flag
     if max_points and len(df) > max_points:
         df = df.head(max_points)
 
+
+    
+    # Step 3: Clean data (categorical encoding)
+    df, _ = clean_data(df, config, dataset_name)
+    print("Category encoding for sex:", dict(enumerate(df["sex"].astype("category").cat.categories)))
+
+
     # Step 2: Assign group labels using condition logic
     variable_of_interest = config[dataset_name].getlist("fairness_variable")
     assert len(variable_of_interest) == 1
@@ -39,6 +46,7 @@ def load_and_prepare_data(ini_path, dataset_name, max_points=None, ml_model_flag
 
     color_flag_array = np.zeros(len(df), dtype=int)
     group_counts = [0 for _ in bucket_conditions]
+
 
     for i, row in df.iterrows():
         for bucket_idx, bucket in enumerate(bucket_conditions):
@@ -50,8 +58,6 @@ def load_and_prepare_data(ini_path, dataset_name, max_points=None, ml_model_flag
             except Exception as e:
                 raise RuntimeError(f"Error evaluating condition `{bucket}` on row {i}: {e}")
 
-    # Step 3: Clean data (categorical encoding)
-    df, _ = clean_data(df, config, dataset_name)
 
     # Step 4: Select specified columns
     selected_columns = config[dataset_name].getlist("columns")

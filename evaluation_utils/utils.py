@@ -1,3 +1,16 @@
+import datetime
+import json
+import random
+from collections import defaultdict
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib import cm
+
+from scipy.spatial.distance import pdist, squareform
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 # Read data in from a given csv_file found in config
 # Arguments:

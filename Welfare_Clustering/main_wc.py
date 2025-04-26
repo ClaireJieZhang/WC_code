@@ -15,7 +15,7 @@ from util.clusteringutil import (clean_data, read_data, scale_data,
 from util.results_util import save_clustering_results
 from collections import defaultdict
 import sys
-from evaluation_utils.data_utils import load_data
+from evaluation_utils.data_utils import load_and_prepare_data
 
 
 def normalize_data(X):
@@ -176,9 +176,9 @@ def run_full_pipeline(config_file, dataset_name, lambda_param=0.5, max_points=No
         centers=centers
     )
     
-    # Add group names to the result
+    # Add centers to final results
+    final_result['centers'] = centers
     final_result['group_names'] = group_names
-
     return final_result
 
 
@@ -241,16 +241,15 @@ def run_full_pipeline_with_loaded_data(df, svar_all, group_names, config_file, d
         centers=centers
     )
 
+    # Add centers to final results
+    final_result['centers'] = centers
     final_result['group_names'] = group_names
     return final_result
 
 
 
 if __name__ == "__main__":
-    import configparser
-    import sys
-    from evaluation_utils.data_utils import load_data  # centralized loader
-
+    
     # === Load outer (controller) config file ===
     outer_config_file = "config/my_experiment.ini"
     outer_config = configparser.ConfigParser(converters={'list': read_list})
@@ -268,7 +267,7 @@ if __name__ == "__main__":
 
     # === Choose pipeline execution path ===
     if use_preloaded_data:
-        data_matrix, group_labels, df_clean, group_names = load_data(
+        data_matrix, group_labels, df_clean, group_names = load_and_prepare_data(
             config_file=config_file,
             dataset_name=dataset_name,
             max_points=max_points

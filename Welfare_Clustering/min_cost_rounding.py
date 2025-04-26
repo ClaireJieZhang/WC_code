@@ -103,9 +103,7 @@ def calculate_assignment_cost(x, distance_matrix):
 
 
 
-
 def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colors, res):
-
     # number of clusters    
     num_clusters = len(centers)
     color_flag = np.array(color_flag)
@@ -113,21 +111,18 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
     lp_sol_val = res["partial_objective"]
     # LP fractional assignments in x 
     x = res["partial_assignment"]
-    x = np.reshape(x, (-1,num_clusters))
-    lp_correct , _ = vet_x(x,epsilon)
+    x = np.reshape(x, (-1, num_clusters))
+    lp_correct, _ = vet_x(x, epsilon)
 
     # NOTE: sometimes CPLEX makes mistakes 
     if not lp_correct:
         raise ValueError('Error: LP has negative values. CPLEX Error')
 
-
     # number of points 
     n = len(df)
     # distance converted to matrix form and is rounded to integer values 
-    d = np.round_(np.reshape(scale_up_factor*distance, (-1,num_clusters)))
-    # get the color_flag in list form 
+    d = np.round_(np.reshape(scale_up_factor * distance, (-1, num_clusters)))
     print('NF Rounding ...')
-
 
     unique_colors = np.unique(color_flag)
     x_rounded = np.zeros_like(x)
@@ -139,10 +134,12 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
         center_node_map = {}
         total_floor = 0
 
+        # Add point nodes
         for j in point_indices:
             node_j = f'p_{j}'
             G.add_node(node_j, demand=-1)
 
+        # Add center nodes
         for i in range(num_clusters):
             center_node = f'c_{i}_h_{h}'
             x_sum = sum(x[j, i] for j in point_indices)
@@ -151,20 +148,60 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
             G.add_node(center_node, demand=x_floor)
             center_node_map[i] = center_node
 
+        # Add sink node
         t_node = f't_{h}'
         G.add_node(t_node, demand=(num_points_in_h - total_floor))
 
+        # Add edges from points to centers
         for j in point_indices:
             for i in range(num_clusters):
-                if x[j, i] > 0:
+                if x[j, i] > 1e-3:  # Threshold for adding edge
                     cost = d[j, i] / num_points_in_h
                     G.add_edge(f'p_{j}', center_node_map[i], weight=cost, capacity=1)
 
+        # Add edges from centers to sink
         for i in range(num_clusters):
             G.add_edge(center_node_map[i], t_node, weight=0, capacity=1)
 
+        # [NEW] Debugging information **before** solving flow
+        # Summarize nodes
+        num_points = 0
+        total_point_demand = 0
+        center_demands = {}
+        for n, data in G.nodes(data=True):
+            if n.startswith('p_'):
+                num_points += 1
+                total_point_demand += data['demand']
+            elif n.startswith('c_'):
+                center_demands[n] = data['demand']
+
+        print(f"\n=== Group {h} ===")
+        print(f"Number of points = {num_points}, total point demand = {total_point_demand}")
+        print(f"Center demands = {center_demands}")
+
+        isolated_nodes = [n for n in G.nodes if G.degree(n) == 0]
+        print(f"Isolated nodes (degree 0) for group {h}: {isolated_nodes}")
+
+        total_demand = sum(data['demand'] for _, data in G.nodes(data=True))
+        print(f"Total demand across all nodes for group {h}: {total_demand}")
+
+        # Check if every center has enough incoming neighbors
+        for center in center_demands.keys():
+            in_degree = G.in_degree(center)
+            required_demand = G.nodes[center]['demand']
+            if in_degree < required_demand:
+                print(f"[WARNING] Center {center} has demand {required_demand} but only {in_degree} incoming edges.")
+
+        # Check if any point has no outgoing edge
+        for j in point_indices:
+            point_node = f'p_{j}'
+            if G.out_degree(point_node) == 0:
+                print(f"[WARNING] Point {point_node} has no outgoing edges.")
+
+        # Solve flow
         flow_cost, flow_dict = nx.network_simplex(G)
 
+        # Fill x_rounded based on flow
         for j in point_indices:
             for i in range(num_clusters):
                 point_node = f'p_{j}'
@@ -174,24 +211,29 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
                         x_rounded[j, i] = 1
 
 
+
+
+    # After rounding all groups
     non_binary = x_rounded[(x_rounded != 0) & (x_rounded != 1)]
     if len(non_binary) > 0:
         print(f"[DEBUG] Non-binary values found in x_rounded: count = {len(non_binary)}")
         print("Example values:", non_binary[:10])
 
-
-    success_flag , x_rounded = check_rounding_and_clip(x_rounded,epsilon)
+    success_flag, x_rounded = check_rounding_and_clip(x_rounded, epsilon)
     
     if success_flag: 
         print('\nNetwork Flow Rounding Done.\n')
     else: 
+        for u, neighbor_flows in flow_dict.items():
+            for v, flow_val in neighbor_flows.items():
+                if not float(flow_val).is_integer():
+                    print(f"Non-integer flow on edge ({u}, {v}): {flow_val}")
         raise ValueError('NF rounding has returned non-integer solution.')
 
-    # Get color proportions for each color and cluster
-    lp_proportions_normalized, lp_proportions = find_proprtions(x,num_colors,color_flag,num_clusters)
-    rounded_proportions_normalized, rounded_proportions = find_proprtions(x_rounded,num_colors,color_flag,num_clusters)
+    # Calculate final proportions and cost
+    lp_proportions_normalized, lp_proportions = find_proprtions(x, num_colors, color_flag, num_clusters)
+    rounded_proportions_normalized, rounded_proportions = find_proprtions(x_rounded, num_colors, color_flag, num_clusters)
 
-    # calculate the objective value according to this
     xlp_cost = calculate_assignment_cost(x, distance)
     rounded_cost = calculate_assignment_cost(x_rounded, distance)
 
@@ -200,36 +242,26 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
     print("[Rounding] Normalized proportions in LP:\n", lp_proportions_normalized)
     print("[Rounding] Normalized proportions after rounding:\n", rounded_proportions_normalized)
 
-
-    #######################################Need to update below final cost to calculate objective value
-    final_cost=rounded_cost
+    final_cost = rounded_cost
     res["objective"] = final_cost
     res['assignment'] = x_rounded 
-    rounded_sol_val = final_cost
-
 
     res['partial_proportions'] = lp_proportions.ravel().tolist()
     res['proportions'] = rounded_proportions.ravel().tolist()
-
     res['partial_proportions_normalized'] = lp_proportions_normalized.ravel().tolist()
     res['proportions_normalized'] = rounded_proportions_normalized.ravel().tolist()
-    #lp_sol_val = res["partial_objective"] * scale_up_factor
-    
-    
-   
+
     ratio_rounded_lp_distance_only = rounded_cost / xlp_cost
-
-
-    #ratio_rounded_lp = rounded_sol_val/lp_sol_val 
     print("ratio_rounded_lp_distance_only")
     print(ratio_rounded_lp_distance_only)
 
-    if (ratio_rounded_lp_distance_only-epsilon)>1:
+    if (ratio_rounded_lp_distance_only - epsilon) > 1:
         raise ValueError('NF rounding has higher cost. Try increasing scale_up_factor.') 
-    else:
-        pass 
-        #print('\n---------\nratio= rounded_sol_val / lp_sol_val = %f' %  ratio_rounded_lp )
-    return res 
+
+    return res
+
+
+
 
 
 def rounding_wrapper(

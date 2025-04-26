@@ -8,9 +8,10 @@ from sklearn.preprocessing import OrdinalEncoder
 import os, pickle
 import sys
 
+
 # Add the parent directory to the path so we can import from evaluation_utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from evaluation_utils.data_utils import load_adult_data, normalize_data
+
 
 
 def give_rand_centers(data, data_pf, data_n, k, best_out_of, seed=None):
@@ -61,8 +62,8 @@ def comp_cost(data, svar, k, clustering, is_fair):
     costs = np.zeros(2)
 
     if is_fair == 0:
-        g1 = (svar == 1)
-        g2 = (svar == 2)
+        g1 = (svar == 0)
+        g2 = (svar == 1)
 
         size1 = np.sum(g1)
         size2 = np.sum(g2)
@@ -205,7 +206,7 @@ def lloyd(data, svar, k, num_iters, best_out_of, rand_centers, is_fair, verbose=
 
     # Separate data by group if fair
     if is_fair:
-        data_sep = [data[svar == 1], data[svar == 2]]
+        data_sep = [data[svar == 0], data[svar == 1]]
         data_temp = np.vstack(data_sep)
         ns = [len(data_sep[0]), len(data_sep[1])]
         data_input = data_sep
@@ -460,7 +461,7 @@ def b_search(deltaA, deltaB, alphaA, alphaB, l, tol=1e-10, max_iter=64):
 
 
 
-def load_data(dataset_name):
+def naive_local_load_data(dataset_name):
     """
     Load dataset features and sensitive attribute for fairness-aware clustering.
 
@@ -529,7 +530,7 @@ def pre_process_education_vector(vec):
 
 def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=False):
     np.random.seed(12345)
-    data_all, svar_all, group_names = load_data(dataset_name)
+    data_all, svar_all, group_names = naive_local_load_data(dataset_name)
     data_normalized = normalize_data(data_all)
     print("First 5 normalized rows:")
     print(data_normalized[:5])
@@ -565,7 +566,7 @@ def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=Fal
         )
 
         cost_f = comp_cost(
-            [data_normalized[svar_all == 1], data_normalized[svar_all == 2]],
+            [data_normalized[svar_all == 0], data_normalized[svar_all == 1]],
             svar_all, k, clustering_f, is_fair=1
         )
 
@@ -597,6 +598,12 @@ def run_sf_pipeline_with_loaded_data(
     Run Fair-Lloyd pipeline using pre-loaded data and group labels.
     Saves results as in original run_pipeline.
     """
+
+    print("[DEBUG] unique group labels:", np.unique(svar_all, return_counts=True))
+    print("[DEBUG] data_all shape:", data_all.shape)
+    print("[DEBUG] svar_all dtype:", svar_all.dtype)
+    print("[DEBUG] svar_all unique values:", np.unique(svar_all))
+
     data_normalized = normalize_data(data_all)
     results = defaultdict(dict)
 
@@ -617,7 +624,7 @@ def run_sf_pipeline_with_loaded_data(
             data_normalized, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=1, verbose=verbose
         )
         cost_f = comp_cost(
-            [data_normalized[svar_all == 1], data_normalized[svar_all == 2]],
+            [data_normalized[svar_all == 0], data_normalized[svar_all == 1]],
             svar_all, k, clustering_f, is_fair=1
         )
 
@@ -641,10 +648,7 @@ def run_sf_pipeline_with_loaded_data(
 
 
 if __name__ == "__main__":
-    import argparse
-    import os
-    from evaluation_utils.data_utils import load_data
-
+   
     parser = argparse.ArgumentParser(description="Run Fair-Lloyd clustering pipeline.")
     parser.add_argument("--dataset", type=str, default="adult", choices=["adult", "credit", "LFW", "compasWB"],
                         help="Dataset name to use.")
