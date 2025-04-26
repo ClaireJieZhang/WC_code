@@ -57,13 +57,24 @@ def evaluate_fcbc_welfare_costs(cache_dir, k, lambda_param=0.5):
         
         # Extract centers and assignment from the results
         centers = np.array(eval(row['centers']))  # Convert string representation to array
-        assignment = np.array(eval(row['assignment']), dtype=int)  # Ensure integer type for indexing
+        assignment_str = row['assignment']
+        print(f"\nRaw assignment string: {assignment_str[:200]}...")  # Print first 200 chars
         
-        # Print dimensions for debugging
+        assignment = np.array(eval(assignment_str), dtype=int)  # Ensure integer type for indexing
+        
+        # Print dimensions and content for debugging
         print(f"\nPOF {pof}:")
         print(f"centers shape: {centers.shape}")
         print(f"assignment shape: {assignment.shape}")
         print(f"assignment min: {assignment.min()}, max: {assignment.max()}")
+        print(f"unique assignments: {np.unique(assignment)}")
+        print(f"first few assignments: {assignment[:10]}")
+        
+        # Verify assignment format
+        if assignment.max() >= centers.shape[0]:
+            raise ValueError(f"Invalid assignment: max value {assignment.max()} >= number of clusters {centers.shape[0]}")
+        if assignment.min() < 0:
+            raise ValueError(f"Invalid assignment: min value {assignment.min()} < 0")
         
         # Calculate welfare cost with slack
         max_welfare_cost, group_costs = evaluate_welfare_cost_with_slack(

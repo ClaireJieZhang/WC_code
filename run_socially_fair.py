@@ -86,6 +86,15 @@ def run_socially_fair_experiment(cache_dir, k_min=4, k_max=8, num_iters=10, best
         pickle.dump(structured_results, f)
     
     print(f"SociallyFair_Python results saved to {output_file}")
+    
+    # Also save results in text format for easy viewing
+    txt_file = os.path.join(results_dir, "results.txt")
+    with open(txt_file, 'w') as f:
+        for k in range(k_min, k_max + 1):
+            result = results[k]
+            f.write(f"k={k}: {result}\n")
+    
+    print(f"Results also saved in text format to {txt_file}")
 
 def main():
     parser = argparse.ArgumentParser(description="Run SociallyFair_Python experiment with cached data")

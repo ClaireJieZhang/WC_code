@@ -101,14 +101,12 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
 
     for h in unique_groups:
         group_mask = (group_labels == h)
-        group_points = points[group_mask]
-        group_assignments = assignment[group_mask]
+        
+        # Distance cost - sum of distances divided by group size
+        group_distances = point_distances[group_mask]
+        distance_cost = np.sum(group_distances) / group_sizes[h]
 
-        # Distance cost
-        group_distances = np.array([distances[i, assignment[i]] for i in range(len(points)) if group_labels[i] == h])
-        avg_distance_cost = np.mean(group_distances)
-
-        # Fairness cost
+        # Fairness cost with slack
         fairness_violation = 0.0
         for cluster_id in range(len(centers)):
             cluster_mask = (assignment == cluster_id)
@@ -128,10 +126,11 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
             else:
                 violation = min(abs(lower_bound - actual_ratio), abs(upper_bound - actual_ratio))
 
-            fairness_violation += violation * cluster_size  # scale by cluster size
+            # Scale violation by cluster size and normalize by total points
+            fairness_violation += violation * cluster_size / total_points
 
         # Combined cost
-        D_h = lambda_param * avg_distance_cost + (1 - lambda_param) * fairness_violation
+        D_h = lambda_param * distance_cost + (1 - lambda_param) * fairness_violation
         group_costs[h] = D_h
 
     max_welfare_cost = max(group_costs.values())

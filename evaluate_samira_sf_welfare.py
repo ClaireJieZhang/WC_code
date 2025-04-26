@@ -100,30 +100,41 @@ def evaluate_samira_sf_costs(cache_dir, k, lambda_param=0.5):
         print(f"assignment shape: {assignment.shape}")
         print(f"assignment min: {assignment.min()}, max: {assignment.max()}")
         
+        # Ensure assignment indices are valid
+        if assignment.max() >= centers.shape[0]:
+            print(f"Warning: Invalid assignment indices found. Max index {assignment.max()} >= number of clusters {centers.shape[0]}")
+            # Clip assignment values to valid range
+            assignment = np.clip(assignment, 0, centers.shape[0] - 1)
+            print(f"After clipping: assignment min: {assignment.min()}, max: {assignment.max()}")
+        
         # Calculate welfare cost with slack
-        max_welfare_cost, group_costs = evaluate_welfare_cost_with_slack(
-            centers=centers,
-            assignment=assignment,
-            points=data_matrix,
-            group_labels=group_labels,
-            lambda_param=lambda_param,
-            alpha=alpha,
-            beta=beta
-        )
-        
-        # Create result row
-        result_row = {
-            'k': k,
-            'method': method,
-            'lambda_param': lambda_param,
-            'max_welfare_cost': max_welfare_cost,
-            'group_costs': group_costs,
-            'runtime': method_results.get('runtime', None),
-            'alpha': str(alpha),
-            'beta': str(beta)
-        }
-        
-        welfare_results.append(result_row)
+        try:
+            max_welfare_cost, group_costs = evaluate_welfare_cost_with_slack(
+                centers=centers,
+                assignment=assignment,
+                points=data_matrix,
+                group_labels=group_labels,
+                lambda_param=lambda_param,
+                alpha=alpha,
+                beta=beta
+            )
+            
+            # Create result row
+            result_row = {
+                'k': k,
+                'method': method,
+                'lambda_param': lambda_param,
+                'max_welfare_cost': max_welfare_cost,
+                'group_costs': group_costs,
+                'runtime': method_results.get('runtime', None),
+                'alpha': str(alpha),
+                'beta': str(beta)
+            }
+            
+            welfare_results.append(result_row)
+        except Exception as e:
+            print(f"Error calculating welfare cost for {method} clustering: {str(e)}")
+            continue
     
     return welfare_results
 
