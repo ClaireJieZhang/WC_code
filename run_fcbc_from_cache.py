@@ -53,6 +53,18 @@ def run_fcbc_experiment(cache_dir, k_min=4, k_max=8, pof_min=1.001, pof_max=1.1,
 
             # Each output corresponds to a different delta
             for output in outputs:
+                # Convert centers and assignment to string format for CSV storage
+                # centers is already a list of lists, so we can use str directly
+                centers_str = str(output['centers'])
+                
+                # assignment might be a numpy array or list, so we handle both cases
+                assignment = output['assignment']
+                if isinstance(assignment, np.ndarray):
+                    # Reshape assignment to match data dimensions
+                    num_points = len(data_matrix)
+                    assignment = assignment[:num_points].astype(int)
+                assignment_str = str(assignment.tolist())
+                
                 result_row = {
                     'k': k,
                     'pof': pof,
@@ -69,7 +81,9 @@ def run_fcbc_experiment(cache_dir, k_min=4, k_max=8, pof_min=1.001, pof_max=1.1,
                     'colorblind_cost': output['unfair_score'],
                     'lambda_param': lambda_param,
                     'num_points': len(data_matrix),
-                    'timestamp': pd.Timestamp.now().isoformat()
+                    'timestamp': pd.Timestamp.now().isoformat(),
+                    'centers': centers_str,
+                    'assignment': assignment_str
                 }
                 k_results.append(result_row)
                 all_results.append(result_row)

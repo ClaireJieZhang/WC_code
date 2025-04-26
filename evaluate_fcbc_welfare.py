@@ -6,18 +6,10 @@ from evaluation_utils.welfare_evaluation import evaluate_welfare_cost
 def load_fcbc_results(cache_dir, k):
     """
     Load FCBC results for a specific k value.
-    
-    Args:
-        cache_dir: str - Directory containing cached data
-        k: int - Number of clusters
-        
-    Returns:
-        tuple - (data_matrix, group_labels, fcbc_results)
     """
     # Load data matrix and group labels
     data_matrix = np.load(os.path.join(cache_dir, "data_matrix.npy"))
-    df_clean = pd.read_csv(os.path.join(cache_dir, "df_clean.csv"))
-    group_labels = df_clean['group'].values
+    group_labels = np.load(os.path.join(cache_dir, "group_labels.npy"))  # <-- load separately
     
     # Load FCBC results for this k
     fcbc_results_file = os.path.join(cache_dir, "fcbc_results", f"fcbc_k{k}_all_pof.csv")
@@ -28,17 +20,14 @@ def load_fcbc_results(cache_dir, k):
 def evaluate_fcbc_welfare_costs(cache_dir, k, lambda_param=0.5):
     """
     Evaluate welfare costs for FCBC results with varying POF values.
-    
-    Args:
-        cache_dir: str - Directory containing cached data
-        k: int - Number of clusters
-        lambda_param: float - Weight between distance and fairness costs
-        
-    Returns:
-        pd.DataFrame - Results with welfare costs for each POF
     """
     # Load data and results
     data_matrix, group_labels, fcbc_results = load_fcbc_results(cache_dir, k)
+    
+    # Print dimensions for debugging
+    print(f"\nData dimensions:")
+    print(f"data_matrix shape: {data_matrix.shape}")
+    print(f"group_labels shape: {group_labels.shape}")
     
     # Initialize list to store results
     welfare_results = []
@@ -49,7 +38,13 @@ def evaluate_fcbc_welfare_costs(cache_dir, k, lambda_param=0.5):
         
         # Extract centers and assignment from the results
         centers = np.array(eval(row['centers']))  # Convert string representation to array
-        assignment = np.array(eval(row['assignment']))
+        assignment = np.array(eval(row['assignment']), dtype=int)  # Ensure integer type for indexing
+        
+        # Print dimensions for debugging
+        print(f"\nPOF {pof}:")
+        print(f"centers shape: {centers.shape}")
+        print(f"assignment shape: {assignment.shape}")
+        print(f"assignment min: {assignment.min()}, max: {assignment.max()}")
         
         # Calculate welfare cost
         welfare_metrics = evaluate_welfare_cost(
@@ -118,4 +113,5 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    evaluate_fcbc_welfare_costs(args.cache_dir, args.k, args.lambda_param) 
+    evaluate_fcbc_welfare_costs(args.cache_dir, args.k, args.lambda_param)
+ 
