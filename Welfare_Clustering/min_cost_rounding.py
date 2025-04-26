@@ -121,6 +121,7 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
     # number of points 
     n = len(df)
     # distance converted to matrix form and is rounded to integer values 
+    #d=np.reshape()
     d = np.round_(np.reshape(scale_up_factor * distance, (-1, num_clusters)))
     print('NF Rounding ...')
 
@@ -156,7 +157,7 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
         for j in point_indices:
             for i in range(num_clusters):
                 if x[j, i] > 1e-3:  # Threshold for adding edge
-                    cost = d[j, i] / num_points_in_h
+                    cost = d[j, i]    ### round here
                     G.add_edge(f'p_{j}', center_node_map[i], weight=cost, capacity=1)
 
         # Add edges from centers to sink
