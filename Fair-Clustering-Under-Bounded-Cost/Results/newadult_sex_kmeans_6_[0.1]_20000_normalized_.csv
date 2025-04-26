@@ -1,0 +1,2 @@
+num_clusters,POF,UtilValue,UtilLP,LP Iters,opt_index,epsilon,Epsilon_set_size,minclustsize,Run_Time
+6.0,1.001,0.25647755102040815,0.24751,7.0,18.0,0.0078125,128.0,98.0,39.72851319098845

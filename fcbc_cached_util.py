@@ -99,9 +99,13 @@ def run_fcbc_with_cached_data(data_matrix, group_labels, k, deltas, pof, lambda_
         else:
             a_val, b_val = 1 / (1 - delta), 1 - delta
         
+        # Ensure alpha and beta are dictionaries with integer keys
         for var, bucket_dict in representation.items():
-            alpha[var] = {k: a_val * representation[var][k] for k in bucket_dict.keys()}
-            beta[var] = {k: b_val * representation[var][k] for k in bucket_dict.keys()}
+            alpha[var] = {}
+            beta[var] = {}
+            for k in bucket_dict.keys():
+                alpha[var][int(k)] = float(a_val * representation[var][k])
+                beta[var][int(k)] = float(b_val * representation[var][k])
         
         # Get the first (and only) variable's values
         fp_color_flag = color_flag['fairness_variable']

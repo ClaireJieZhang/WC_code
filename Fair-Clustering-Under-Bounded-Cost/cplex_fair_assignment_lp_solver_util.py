@@ -33,6 +33,15 @@ def fair_partial_assignment_util(df, centers, initial_score, delta, color_proprt
         while (L_viol_idx <= R_viol_idx):
             counter += 1 
             m_viol_idx = int(np.floor((L_viol_idx + R_viol_idx) / 2)) 
+
+            print("---DEBUG before relax_util_viol ---")
+            print(f"alpha: type = {type(alpha)}, shape={np.shape(alpha)}, value={alpha}")
+            print(f"beta: type = {type(beta)}, shape={np.shape(beta)}, value={beta}")
+            print(f"r_min: type = {type(r_min)}, shape={np.shape(beta)}, value={r_min}")
+            print(f"r_max: type = {type(r_max)}, shape={np.shape(beta)}, value={r_max}")
+            print("---------------------------------")
+
+
             alpha_relax, beta_relax = relax_util_viol(beta_min,beta_max,alpha_min,alpha_max, alpha,beta,col_min,col_max,delta,r_min,r_max,E_eps[m_viol_idx])
             problem, objective = fair_partial_assignment_lp_solver(df, centers, initial_score, alpha_POF, color_flag, alpha_relax, beta_relax, cost_fun_string, L, clustering_method)
             problem.solve()
@@ -57,6 +66,9 @@ def fair_partial_assignment_util(df, centers, initial_score, delta, color_proprt
             util_lp = 2*E_eps[best_viol]-bound
         else:
             util_lp = E_eps[best_viol]
+        
+       
+
 
         alpha_relax, beta_relax = relax_util_viol(beta_min,beta_max,alpha_min,alpha_max, alpha,beta,col_min,col_max,delta,r_min,r_max,E_eps[best_viol])
         problem, objective = fair_partial_assignment_lp_solver(df, centers, initial_score, alpha_POF, color_flag, alpha_relax, beta_relax, cost_fun_string, L, clustering_method)
