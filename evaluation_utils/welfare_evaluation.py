@@ -69,4 +69,70 @@ def evaluate_welfare_cost(centers, assignment, points, group_labels, lambda_para
     return {
         'max_welfare_cost': max_welfare_cost,
         'group_costs': group_costs
-    } 
+    }
+
+def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, lambda_param, alpha, beta, p=2):
+    """
+    Extended version of evaluate_welfare_cost.
+    Accepts asymmetric group-specific slack (alpha, beta) to define fairness violation.
+
+    Args:
+        centers: (k, d) array of cluster centers
+        assignment: (n,) array of cluster assignments
+        points: (n, d) array of data points
+        group_labels: (n,) array of group labels
+        lambda_param: float in [0, 1], balance between distance and fairness
+        alpha: dict mapping group label -> alpha value (positive slack)
+        beta: dict mapping group label -> beta value (negative slack)
+        p: 1 (L1) or 2 (L2) distance
+    Returns:
+        max_welfare_cost: float, maximum D_h across groups
+        group_costs: dict mapping group label -> D_h
+    """
+    unique_groups = np.unique(group_labels)
+    total_points = len(points)
+    group_sizes = {h: np.sum(group_labels == h) for h in unique_groups}
+    group_proportions = {h: size / total_points for h, size in group_sizes.items()}
+
+    distances = cdist(points, centers, metric='sqeuclidean' if p == 2 else 'cityblock')
+    point_distances = np.array([distances[i, assignment[i]] for i in range(len(points))])
+
+    group_costs = {}
+
+    for h in unique_groups:
+        group_mask = (group_labels == h)
+        group_points = points[group_mask]
+        group_assignments = assignment[group_mask]
+
+        # Distance cost
+        group_distances = np.array([distances[i, assignment[i]] for i in range(len(points)) if group_labels[i] == h])
+        avg_distance_cost = np.mean(group_distances)
+
+        # Fairness cost
+        fairness_violation = 0.0
+        for cluster_id in range(len(centers)):
+            cluster_mask = (assignment == cluster_id)
+            cluster_size = np.sum(cluster_mask)
+            if cluster_size == 0:
+                continue  # skip empty clusters
+
+            group_in_cluster = np.sum((group_labels == h) & cluster_mask)
+            actual_ratio = group_in_cluster / cluster_size
+            expected_ratio = group_proportions[h]
+
+            lower_bound = expected_ratio - beta[h]
+            upper_bound = expected_ratio + alpha[h]
+
+            if lower_bound <= actual_ratio <= upper_bound:
+                violation = 0.0
+            else:
+                violation = min(abs(lower_bound - actual_ratio), abs(upper_bound - actual_ratio))
+
+            fairness_violation += violation * cluster_size  # scale by cluster size
+
+        # Combined cost
+        D_h = lambda_param * avg_distance_cost + (1 - lambda_param) * fairness_violation
+        group_costs[h] = D_h
+
+    max_welfare_cost = max(group_costs.values())
+    return max_welfare_cost, group_costs
