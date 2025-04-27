@@ -337,6 +337,7 @@ def find_clustering(data, ns, centers, is_last, is_fair):
                                 cluster_idx2[j - n1] = i
                             break
 
+    
         return [cluster_idx1, cluster_idx2]
 
 
@@ -570,10 +571,15 @@ def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=Fal
             svar_all, k, clustering_f, is_fair=1
         )
 
+        assignment = np.empty_like(svar_all)
+        assignment[svar_all == 0] = clustering_f[0]
+        assignment[svar_all == 1] = clustering_f[1]
+
         results[k]['centers_f'] = centers_f
         results[k]['clustering_f'] = clustering_f
         results[k]['runtime_f'] = runtime_f
         results[k]['cost_f'] = cost_f
+        results[k]['assignment'] = assignment
 
     os.makedirs("results", exist_ok=True)
     out_path = f"results/{dataset_name}_k{k_min}-{k_max}_results.pkl"
@@ -628,6 +634,10 @@ def run_sf_pipeline_with_loaded_data(
             svar_all, k, clustering_f, is_fair=1
         )
 
+        assignment = np.empty_like(svar_all)
+        assignment[svar_all == 0] = clustering_f[0]
+        assignment[svar_all == 1] = clustering_f[1]
+
         results[k]['centers'] = centers
         results[k]['clustering'] = clustering
         results[k]['runtime'] = runtime
@@ -637,6 +647,7 @@ def run_sf_pipeline_with_loaded_data(
         results[k]['clustering_f'] = clustering_f
         results[k]['runtime_f'] = runtime_f
         results[k]['cost_f'] = cost_f
+        results[k]['assignment'] = assignment
 
     os.makedirs("results", exist_ok=True)
     out_path = f"results/{dataset_name}_k{k_min}-{k_max}_results.pkl"

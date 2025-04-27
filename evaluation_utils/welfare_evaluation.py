@@ -88,6 +88,8 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
     Returns:
         max_welfare_cost: float, maximum D_h across groups
         group_costs: dict mapping group label -> D_h
+        cluster_stats: dict containing group proportions and violations for each cluster
+        group_distance_costs: dict mapping group label -> average distance cost
     """
     unique_groups = np.unique(group_labels)
     total_points = len(points)
@@ -98,6 +100,11 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
     point_distances = np.array([distances[i, assignment[i]] for i in range(len(points))])
 
     group_costs = {}
+    group_distance_costs = {}
+    cluster_stats = {
+        'expected_proportions': group_proportions,
+        'clusters': {}
+    }
 
     for h in unique_groups:
         group_mask = (group_labels == h)
@@ -105,6 +112,7 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
         # Distance cost - sum of distances divided by group size
         group_distances = point_distances[group_mask]
         distance_cost = np.sum(group_distances) / group_sizes[h]
+        group_distance_costs[h] = float(distance_cost)
 
         # Fairness cost with slack
         fairness_violation = 0.0
@@ -129,9 +137,19 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
             # Scale violation by cluster size and normalize by total points
             fairness_violation += violation * cluster_size / total_points
 
+            # Store cluster statistics
+            if cluster_id not in cluster_stats['clusters']:
+                cluster_stats['clusters'][cluster_id] = {
+                    'size': int(cluster_size),
+                    'group_proportions': {},
+                    'violations': {}
+                }
+            cluster_stats['clusters'][cluster_id]['group_proportions'][h] = float(actual_ratio)
+            cluster_stats['clusters'][cluster_id]['violations'][h] = float(violation)
+
         # Combined cost
         D_h = lambda_param * distance_cost + (1 - lambda_param) * fairness_violation
         group_costs[h] = D_h
 
     max_welfare_cost = max(group_costs.values())
-    return max_welfare_cost, group_costs
+    return max_welfare_cost, group_costs, cluster_stats, group_distance_costs

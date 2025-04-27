@@ -64,13 +64,8 @@ def run_socially_fair_experiment(cache_dir, k_min=4, k_max=8, num_iters=10, best
     
     # Process each k value's results
     for k, result in results.items():
+        # Only save the 'fair' results
         structured_results['results'][str(k)] = {
-            'standard': {
-                'centers': result['centers'].tolist(),
-                'assignment': result['clustering'].tolist(),
-                'runtime': result['runtime'],
-                'cost': result['cost'].tolist()
-            },
             'fair': {
                 'centers': result['centers_f'].tolist(),
                 'assignment': result['clustering_f'][0].tolist(),  # Take first assignment

@@ -42,6 +42,22 @@ def load_alpha_beta_from_config(config_file):
     
     return alpha, beta
 
+def convert_to_serializable(obj):
+    """Convert numpy types to Python native types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {convert_to_serializable(key): convert_to_serializable(value) 
+                for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return convert_to_serializable(obj.tolist())
+    else:
+        return obj
+
 def evaluate_welfare_clustering_costs(cache_dir, k, lambda_param):
     """Evaluate Welfare Clustering costs for a specific k value."""
     # Load data
@@ -72,7 +88,7 @@ def evaluate_welfare_clustering_costs(cache_dir, k, lambda_param):
     print(f"Beta: {beta}")
     
     # Calculate welfare cost with slack
-    max_welfare_cost, group_costs = evaluate_welfare_cost_with_slack(
+    max_welfare_cost, group_costs, cluster_stats, group_distance_costs = evaluate_welfare_cost_with_slack(
         centers=centers,
         assignment=assignment,
         points=data_matrix,
@@ -88,9 +104,12 @@ def evaluate_welfare_clustering_costs(cache_dir, k, lambda_param):
         'lambda_param': lambda_param,
         'max_welfare_cost': max_welfare_cost,
         'group_costs': group_costs,
+        'group_distance_costs': group_distance_costs,
         'alpha': str(alpha),
         'beta': str(beta),
-        'runtime': None
+        'runtime': None,
+        'expected_proportions': cluster_stats['expected_proportions'],
+        'cluster_stats': cluster_stats['clusters']
     }
     
     return result_row
@@ -108,23 +127,66 @@ def evaluate_welfare_clustering_costs_range(cache_dir, k_min, k_max, lambda_para
             result_row = evaluate_welfare_clustering_costs(cache_dir, k, lambda_param)
             all_results.append(result_row)
             print(f"Welfare cost for k={k}: {result_row['max_welfare_cost']:.4f}")
+            
+            # Print group proportions
+            print("\nCluster statistics:")
+            print("Expected proportions:", result_row['expected_proportions'])
+            for cluster_id, stats in result_row['cluster_stats'].items():
+                print(f"\nCluster {cluster_id} (size={stats['size']}):")
+                print("  Proportions:", stats['group_proportions'])
+                print("  Violations:", stats['violations'])
+                
         except Exception as e:
             print(f"Error evaluating k={k}: {str(e)}")
     
-    # Convert to DataFrame
-    df_welfare = pd.DataFrame(all_results)
-    
-    # Save results
+    # Convert to DataFrame and save detailed results
     results_dir = os.path.join(cache_dir, "welfare_evaluation")
     os.makedirs(results_dir, exist_ok=True)
     
-    # Save combined results
-    output_file = os.path.join(results_dir, f"welfare_clustering_all_k{k_min}_to_{k_max}_welfare_costs.csv")
-    df_welfare.to_csv(output_file, index=False)
+    # Convert numpy types to Python native types for JSON serialization
+    serializable_results = convert_to_serializable(all_results)
     
-    print(f"\nAll results saved to: {output_file}")
+    # Save full results with cluster statistics
+    output_file = os.path.join(results_dir, f"welfare_clustering_all_k{k_min}_to_{k_max}_detailed.json")
+    with open(output_file, 'w') as f:
+        json.dump(serializable_results, f, indent=2)
+    print(f"\nDetailed results saved to: {output_file}")
     
-    return df_welfare
+    # Save summary metrics to CSV
+    summary_results = []
+    for result in all_results:
+        summary_row = {
+            'k': int(result['k']),
+            'lambda_param': float(result['lambda_param']),
+            'max_welfare_cost': float(result['max_welfare_cost']),
+            'runtime': float(result['runtime']) if result['runtime'] is not None else None
+        }
+        # Add group costs
+        for group, cost in result['group_costs'].items():
+            summary_row[f'group_{group}_cost'] = float(cost)
+        # Add group distance costs
+        for group, dist_cost in result['group_distance_costs'].items():
+            summary_row[f'group_{group}_distance_cost'] = float(dist_cost)
+        
+        # Add average costs per group
+        for group in result['group_costs'].keys():
+            group_costs = []
+            for cluster_id, stats in result['cluster_stats'].items():
+                if group in stats['group_proportions']:
+                    cluster_size = stats['size']
+                    group_prop = stats['group_proportions'][group]
+                    group_costs.append(group_prop * cluster_size)
+            avg_cost = sum(group_costs) / len(group_costs) if group_costs else 0
+            summary_row[f'group_{group}_avg_cost'] = float(avg_cost)
+        
+        summary_results.append(summary_row)
+    
+    df_summary = pd.DataFrame(summary_results)
+    summary_file = os.path.join(results_dir, f"welfare_clustering_all_k{k_min}_to_{k_max}_summary.csv")
+    df_summary.to_csv(summary_file, index=False)
+    print(f"Summary results saved to: {summary_file}")
+    
+    return df_summary
 
 if __name__ == "__main__":
     import argparse

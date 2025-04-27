@@ -5,6 +5,7 @@ import pickle
 import configparser
 import ast
 from evaluation_utils.welfare_evaluation import evaluate_welfare_cost_with_slack
+import json
 
 def parse_numpy_array(array_str):
     """
@@ -85,58 +86,85 @@ def evaluate_samira_sf_costs(cache_dir, k, lambda_param=0.5):
     # Initialize list to store results
     welfare_results = []
     
-    # Process standard and fair clustering results
-    for method in ['standard', 'fair']:
-        if method not in k_results:
-            continue
-            
-        method_results = k_results[method]
-        centers = np.array(method_results['centers'])
-        assignment = np.array(method_results['assignment'])
+    # Only process 'fair' clustering results
+    if 'fair' not in k_results:
+        print(f"No 'fair' results found for k={k}")
+        return welfare_results
+    method_results = k_results['fair']
+    centers = np.array(method_results['centers'])
+    assignment = np.array(method_results['assignment'])
+    
+    # Print dimensions for debugging
+    print(f"\nFair clustering:")
+    print(f"centers shape: {centers.shape}")
+    print(f"assignment shape: {assignment.shape}")
+    print(f"assignment min: {assignment.min()}, max: {assignment.max()}")
+    
+    # Ensure assignment indices are valid
+    if assignment.max() >= centers.shape[0]:
+        print(f"Warning: Invalid assignment indices found. Max index {assignment.max()} >= number of clusters {centers.shape[0]}")
+        # Clip assignment values to valid range
+        assignment = np.clip(assignment, 0, centers.shape[0] - 1)
+        print(f"After clipping: assignment min: {assignment.min()}, max: {assignment.max()}")
+    
+    # Calculate welfare cost with slack
+    try:
+        max_welfare_cost, group_costs, cluster_stats, group_distance_costs = evaluate_welfare_cost_with_slack(
+            centers=centers,
+            assignment=assignment,
+            points=data_matrix,
+            group_labels=group_labels,
+            lambda_param=lambda_param,
+            alpha=alpha,
+            beta=beta
+        )
         
-        # Print dimensions for debugging
-        print(f"\n{method.capitalize()} clustering:")
-        print(f"centers shape: {centers.shape}")
-        print(f"assignment shape: {assignment.shape}")
-        print(f"assignment min: {assignment.min()}, max: {assignment.max()}")
+        # Create result row
+        result_row = {
+            'k': k,
+            'method': 'fair',
+            'lambda_param': lambda_param,
+            'max_welfare_cost': max_welfare_cost,
+            'group_costs': group_costs,
+            'group_distance_costs': group_distance_costs,
+            'runtime': method_results.get('runtime', None),
+            'alpha': str(alpha),
+            'beta': str(beta),
+            'expected_proportions': cluster_stats['expected_proportions'],
+            'cluster_stats': cluster_stats['clusters']
+        }
         
-        # Ensure assignment indices are valid
-        if assignment.max() >= centers.shape[0]:
-            print(f"Warning: Invalid assignment indices found. Max index {assignment.max()} >= number of clusters {centers.shape[0]}")
-            # Clip assignment values to valid range
-            assignment = np.clip(assignment, 0, centers.shape[0] - 1)
-            print(f"After clipping: assignment min: {assignment.min()}, max: {assignment.max()}")
+        welfare_results.append(result_row)
         
-        # Calculate welfare cost with slack
-        try:
-            max_welfare_cost, group_costs = evaluate_welfare_cost_with_slack(
-                centers=centers,
-                assignment=assignment,
-                points=data_matrix,
-                group_labels=group_labels,
-                lambda_param=lambda_param,
-                alpha=alpha,
-                beta=beta
-            )
+        # Print group proportions for each cluster
+        print(f"\nGroup proportions for fair clustering (k={k}):")
+        print("Expected proportions:", cluster_stats['expected_proportions'])
+        print("\nActual proportions by cluster:")
+        for cluster_id, stats in cluster_stats['clusters'].items():
+            print(f"Cluster {cluster_id} (size={stats['size']}):")
+            print("  Proportions:", stats['group_proportions'])
+            print("  Violations:", stats['violations'])
             
-            # Create result row
-            result_row = {
-                'k': k,
-                'method': method,
-                'lambda_param': lambda_param,
-                'max_welfare_cost': max_welfare_cost,
-                'group_costs': group_costs,
-                'runtime': method_results.get('runtime', None),
-                'alpha': str(alpha),
-                'beta': str(beta)
-            }
-            
-            welfare_results.append(result_row)
-        except Exception as e:
-            print(f"Error calculating welfare cost for {method} clustering: {str(e)}")
-            continue
+    except Exception as e:
+        print(f"Error calculating welfare cost for fair clustering: {str(e)}")
     
     return welfare_results
+
+def convert_to_serializable(obj):
+    """Convert numpy types to Python native types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {convert_to_serializable(key): convert_to_serializable(value) 
+                for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return convert_to_serializable(obj.tolist())
+    else:
+        return obj
 
 def evaluate_samira_sf_costs_range(cache_dir, k_min, k_max, lambda_param=0.5):
     """
@@ -160,20 +188,43 @@ def evaluate_samira_sf_costs_range(cache_dir, k_min, k_max, lambda_param=0.5):
         except Exception as e:
             print(f"Error evaluating k={k}: {str(e)}")
     
-    # Convert to DataFrame
-    df_welfare = pd.DataFrame(all_results)
-    
-    # Save results
+    # Convert to DataFrame and save detailed results
     results_dir = os.path.join(cache_dir, "welfare_evaluation")
     os.makedirs(results_dir, exist_ok=True)
     
-    # Save combined results
-    output_file = os.path.join(results_dir, f"samira_sf_all_k{k_min}_to_{k_max}_welfare_costs.csv")
-    df_welfare.to_csv(output_file, index=False)
+    # Convert numpy types to Python native types for JSON serialization
+    serializable_results = convert_to_serializable(all_results)
     
-    print(f"\nAll results saved to: {output_file}")
+    # Save full results with cluster statistics
+    output_file = os.path.join(results_dir, f"samira_sf_all_k{k_min}_to_{k_max}_detailed.json")
+    with open(output_file, 'w') as f:
+        json.dump(serializable_results, f, indent=2)
+    print(f"\nDetailed results saved to: {output_file}")
     
-    return df_welfare
+    # Save summary metrics to CSV
+    summary_results = []
+    for result in all_results:
+        summary_row = {
+            'k': int(result['k']),  # Convert to native Python int
+            'method': result['method'],
+            'lambda_param': float(result['lambda_param']),  # Convert to native Python float
+            'max_welfare_cost': float(result['max_welfare_cost']),
+            'runtime': float(result['runtime']) if result['runtime'] is not None else None
+        }
+        # Add group costs
+        for group, cost in result['group_costs'].items():
+            summary_row[f'group_{group}_cost'] = float(cost)  # Convert to native Python float
+        # Add group distance costs
+        for group, dist_cost in result['group_distance_costs'].items():
+            summary_row[f'group_{group}_distance_cost'] = float(dist_cost)
+        summary_results.append(summary_row)
+    
+    df_summary = pd.DataFrame(summary_results)
+    summary_file = os.path.join(results_dir, f"samira_sf_all_k{k_min}_to_{k_max}_summary.csv")
+    df_summary.to_csv(summary_file, index=False)
+    print(f"Summary results saved to: {summary_file}")
+    
+    return df_summary
 
 if __name__ == "__main__":
     import argparse
