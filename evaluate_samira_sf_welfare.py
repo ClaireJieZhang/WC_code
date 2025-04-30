@@ -34,23 +34,41 @@ def load_samira_sf_results(cache_dir, k):
     """
     Load Samira's SF results for a specific k value.
     """
-    # Load data matrix and group labels
+    # Load data matrix and group labels from the data directory
     data_matrix = np.load(os.path.join(cache_dir, "data_matrix.npy"))
     group_labels = np.load(os.path.join(cache_dir, "group_labels.npy"))
     
-    # Find the most recent results file
-    results_dir = os.path.join(cache_dir, "socially_fair_results")
-    result_files = [f for f in os.listdir(results_dir) if f.startswith("sf_results_") and f.endswith(".pkl")]
-    if not result_files:
-        raise FileNotFoundError(f"No Samira's SF results found in {results_dir}")
+    # Find the results file in the sf_results directory
+    results_dir = os.path.join(cache_dir, "sf_results")
+    if not os.path.exists(results_dir):
+        raise FileNotFoundError(f"Results directory not found: {results_dir}")
     
-    # Sort by timestamp in filename and get the most recent
-    latest_file = sorted(result_files)[-1]
-    with open(os.path.join(results_dir, latest_file), 'rb') as f:
-        results = pickle.load(f)
+    # Look for detailed_results_k{k}.json file
+    json_file = os.path.join(results_dir, f"detailed_results_k{k}.json")
+    if not os.path.exists(json_file):
+        raise FileNotFoundError(f"No Samira's SF results found for k={k} in {results_dir}")
     
-    # Get results for this k value
-    k_results = results['results'][str(k)]
+    # Load the JSON file
+    with open(json_file, 'r') as f:
+        results = json.load(f)
+    
+    # Extract the centers and assignment from the JSON structure
+    # The structure is different from the PKL format, so we need to adapt
+    if 'data' not in results:
+        raise ValueError(f"Results file for k={k} does not contain 'data' field")
+    
+    data = results['data']
+    if 'centers' not in data or 'assignment' not in data:
+        raise ValueError(f"Results file for k={k} does not contain required 'centers' and 'assignment' fields")
+    
+    # Create a structure similar to what the original code expected
+    k_results = {
+        'fair': {
+            'centers': data['centers'],
+            'assignment': data['assignment'],
+            'runtime': data.get('metrics', {}).get('runtime', None)
+        }
+    }
     
     return data_matrix, group_labels, k_results
 
@@ -170,7 +188,7 @@ def evaluate_samira_sf_costs_range(cache_dir, k_min, k_max, lambda_param=0.5):
     """
     Evaluate welfare costs for Samira's SF results for a range of k values.
     """
-    print(f"Evaluating Samira's SF welfare costs for k from {k_min} to {k_max}")
+    print(f"Evaluating Samira's SF welfare costs for k from {k_min} to {k_max} with lambda={lambda_param}")
     
     # Initialize list to store all results
     all_results = []
@@ -182,21 +200,30 @@ def evaluate_samira_sf_costs_range(cache_dir, k_min, k_max, lambda_param=0.5):
             all_results.extend(k_results)
             
             # Find minimum welfare cost for this k
-            k_df = pd.DataFrame(k_results)
-            min_cost_row = k_df.loc[k_df['max_welfare_cost'].idxmin()]
-            print(f"\nMinimum welfare cost for k={k}: {min_cost_row['max_welfare_cost']:.4f} with {min_cost_row['method']} clustering")
+            if k_results:  # Only process if we have results
+                k_df = pd.DataFrame(k_results)
+                min_cost_row = k_df.loc[k_df['max_welfare_cost'].idxmin()]
+                print(f"\nMinimum welfare cost for k={k}: {min_cost_row['max_welfare_cost']:.4f} with {min_cost_row['method']} clustering")
         except Exception as e:
             print(f"Error evaluating k={k}: {str(e)}")
+            continue
     
-    # Convert to DataFrame and save detailed results
+    # Create welfare_evaluation directory if it doesn't exist
     results_dir = os.path.join(cache_dir, "welfare_evaluation")
     os.makedirs(results_dir, exist_ok=True)
+    
+    if not all_results:
+        print("No results were successfully evaluated")
+        return None
     
     # Convert numpy types to Python native types for JSON serialization
     serializable_results = convert_to_serializable(all_results)
     
+    # Include lambda in output filenames
+    lambda_str = f"lambda_{str(lambda_param).replace('.', '_')}"
+    
     # Save full results with cluster statistics
-    output_file = os.path.join(results_dir, f"samira_sf_all_k{k_min}_to_{k_max}_detailed.json")
+    output_file = os.path.join(results_dir, f"samira_sf_all_k{k_min}_to_{k_max}_{lambda_str}_detailed.json")
     with open(output_file, 'w') as f:
         json.dump(serializable_results, f, indent=2)
     print(f"\nDetailed results saved to: {output_file}")
@@ -205,22 +232,34 @@ def evaluate_samira_sf_costs_range(cache_dir, k_min, k_max, lambda_param=0.5):
     summary_results = []
     for result in all_results:
         summary_row = {
-            'k': int(result['k']),  # Convert to native Python int
+            'k': int(result['k']),
             'method': result['method'],
-            'lambda_param': float(result['lambda_param']),  # Convert to native Python float
+            'lambda_param': float(result['lambda_param']),
             'max_welfare_cost': float(result['max_welfare_cost']),
             'runtime': float(result['runtime']) if result['runtime'] is not None else None
         }
         # Add group costs
         for group, cost in result['group_costs'].items():
-            summary_row[f'group_{group}_cost'] = float(cost)  # Convert to native Python float
+            summary_row[f'group_{group}_cost'] = float(cost)
         # Add group distance costs
         for group, dist_cost in result['group_distance_costs'].items():
             summary_row[f'group_{group}_distance_cost'] = float(dist_cost)
+        
+        # Add average costs per group
+        for group in result['group_costs'].keys():
+            group_costs = []
+            for cluster_id, stats in result['cluster_stats'].items():
+                if group in stats['group_proportions']:
+                    cluster_size = stats['size']
+                    group_prop = stats['group_proportions'][group]
+                    group_costs.append(group_prop * cluster_size)
+            avg_cost = sum(group_costs) / len(group_costs) if group_costs else 0
+            summary_row[f'group_{group}_avg_cost'] = float(avg_cost)
+        
         summary_results.append(summary_row)
     
     df_summary = pd.DataFrame(summary_results)
-    summary_file = os.path.join(results_dir, f"samira_sf_all_k{k_min}_to_{k_max}_summary.csv")
+    summary_file = os.path.join(results_dir, f"samira_sf_all_k{k_min}_to_{k_max}_{lambda_str}_summary.csv")
     df_summary.to_csv(summary_file, index=False)
     print(f"Summary results saved to: {summary_file}")
     
@@ -233,7 +272,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default="cache", help="Directory containing cached data")
     parser.add_argument("--k_min", type=int, required=True, help="Minimum number of clusters")
     parser.add_argument("--k_max", type=int, required=True, help="Maximum number of clusters")
-    parser.add_argument("--lambda_param", type=float, default=0.5, help="Weight between distance and fairness costs")
+    parser.add_argument("--lambda_param", type=float, required=True, help="Lambda parameter to evaluate")
     
     args = parser.parse_args()
     

@@ -1,0 +1,21 @@
+{
+  "timestamp": "2025-04-29T13:13:45.731896",
+  "parameters": {
+    "k_range": [
+      4
+    ],
+    "num_iters": 10,
+    "best_out_of": 10,
+    "init_method": "kmeanspp",
+    "normalize_data": false
+  },
+  "summary": {
+    "4": {
+      "runtime": 0.038272643089294435,
+      "cost": [
+        0.9647649324514195,
+        0.9647649325356248
+      ]
+    }
+  }
+}

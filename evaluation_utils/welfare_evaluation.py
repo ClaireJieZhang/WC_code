@@ -90,6 +90,7 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
         group_costs: dict mapping group label -> D_h
         cluster_stats: dict containing group proportions and violations for each cluster
         group_distance_costs: dict mapping group label -> average distance cost
+        group_fairness_costs: dict mapping group label -> fairness violation cost
     """
     unique_groups = np.unique(group_labels)
     total_points = len(points)
@@ -101,6 +102,7 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
 
     group_costs = {}
     group_distance_costs = {}
+    group_fairness_costs = {}
     cluster_stats = {
         'expected_proportions': group_proportions,
         'clusters': {}
@@ -134,8 +136,8 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
             else:
                 violation = min(abs(lower_bound - actual_ratio), abs(upper_bound - actual_ratio))
 
-            # Scale violation by cluster size and normalize by total points
-            fairness_violation += violation * cluster_size / total_points
+            # Scale violation by cluster size and normalize by group size
+            fairness_violation += violation * cluster_size / group_sizes[h]
 
             # Store cluster statistics
             if cluster_id not in cluster_stats['clusters']:
@@ -147,9 +149,12 @@ def evaluate_welfare_cost_with_slack(centers, assignment, points, group_labels, 
             cluster_stats['clusters'][cluster_id]['group_proportions'][h] = float(actual_ratio)
             cluster_stats['clusters'][cluster_id]['violations'][h] = float(violation)
 
+        # Store raw fairness violation cost
+        group_fairness_costs[h] = float(fairness_violation)
+
         # Combined cost
         D_h = lambda_param * distance_cost + (1 - lambda_param) * fairness_violation
         group_costs[h] = D_h
 
     max_welfare_cost = max(group_costs.values())
-    return max_welfare_cost, group_costs, cluster_stats, group_distance_costs
+    return max_welfare_cost, group_costs, cluster_stats, group_distance_costs, group_fairness_costs

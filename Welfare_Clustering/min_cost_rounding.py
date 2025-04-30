@@ -156,7 +156,7 @@ def min_cost_rounding_color_specific(df, centers, distance, color_flag, num_colo
         # Add edges from points to centers
         for j in point_indices:
             for i in range(num_clusters):
-                if x[j, i] > 1e-3:  # Threshold for adding edge
+                if x[j, i] > 0:  # Threshold for adding edge
                     cost = d[j, i]    ### round here
                     G.add_edge(f'p_{j}', center_node_map[i], weight=cost, capacity=1)
 

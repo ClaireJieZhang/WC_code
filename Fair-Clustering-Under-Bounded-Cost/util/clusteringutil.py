@@ -373,17 +373,26 @@ def arya_etal_k_median(df, n_clusters, num_trial = 1):
 # Returns None if the given clustering_method is invalid
 def vanilla_clustering(df, num_clusters, clustering_method):
     if clustering_method == "kmeans":
-        kmeans = KMeans(num_clusters)
-        kmeans.fit(df)
-        initial_score = np.sqrt(-kmeans.score(df))
-        pred = kmeans.predict(df)
-        cluster_centers = kmeans.cluster_centers_
-        return initial_score, pred, sort_centers(cluster_centers)
+        best_score = float('inf')
+        best_centers = None
+        best_pred = None
+        
+        # Run KMeans 5 times with different initializations
+        for _ in range(5):
+            kmeans = KMeans(n_clusters=num_clusters, init='k-means++', n_init=1)
+            kmeans.fit(df)
+            score = np.sqrt(-kmeans.score(df))  # Convert negative score to positive cost
+            
+            if score < best_score:
+                best_score = score
+                best_centers = kmeans.cluster_centers_
+                best_pred = kmeans.predict(df)
+        
+        return best_score, best_pred, sort_centers(best_centers)
     elif clustering_method == "kmedian":
         return arya_etal_k_median(df, num_clusters, 5)
     elif clustering_method == "kcenter":
         return gonzales_k_center(df, num_clusters)
-
     else:
         raise Exception("Not a valid clustering method. Available methods are: " 
               "\'kmeans\', \'kmedian\', and \'kcenter\'.")

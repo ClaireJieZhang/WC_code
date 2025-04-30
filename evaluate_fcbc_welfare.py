@@ -137,7 +137,7 @@ def evaluate_fcbc_welfare_costs_range(cache_dir, k_min, k_max, lambda_param=0.5)
     """
     Evaluate welfare costs for FCBC results for a range of k values.
     """
-    print(f"Evaluating FCBC welfare costs for k from {k_min} to {k_max}")
+    print(f"Evaluating FCBC welfare costs for k from {k_min} to {k_max} with lambda={lambda_param}")
     
     # Initialize list to store all results
     all_results = []
@@ -164,16 +164,24 @@ def evaluate_fcbc_welfare_costs_range(cache_dir, k_min, k_max, lambda_param=0.5)
             
         except Exception as e:
             print(f"Error evaluating k={k}: {str(e)}")
+            continue
     
-    # Convert to DataFrame and save detailed results
+    # Create welfare_evaluation directory if it doesn't exist
     results_dir = os.path.join(cache_dir, "welfare_evaluation")
     os.makedirs(results_dir, exist_ok=True)
+    
+    if not all_results:
+        print("No results were successfully evaluated")
+        return None
     
     # Convert numpy types to Python native types for JSON serialization
     serializable_results = convert_to_serializable(all_results)
     
+    # Include lambda in output filenames
+    lambda_str = f"lambda_{str(lambda_param).replace('.', '_')}"
+    
     # Save full results with cluster statistics
-    output_file = os.path.join(results_dir, f"fcbc_all_k{k_min}_to_{k_max}_detailed.json")
+    output_file = os.path.join(results_dir, f"fcbc_all_k{k_min}_to_{k_max}_{lambda_str}_detailed.json")
     with open(output_file, 'w') as f:
         json.dump(serializable_results, f, indent=2)
     print(f"\nDetailed results saved to: {output_file}")
@@ -210,7 +218,7 @@ def evaluate_fcbc_welfare_costs_range(cache_dir, k_min, k_max, lambda_param=0.5)
         summary_results.append(summary_row)
     
     df_summary = pd.DataFrame(summary_results)
-    summary_file = os.path.join(results_dir, f"fcbc_all_k{k_min}_to_{k_max}_summary.csv")
+    summary_file = os.path.join(results_dir, f"fcbc_all_k{k_min}_to_{k_max}_{lambda_str}_summary.csv")
     df_summary.to_csv(summary_file, index=False)
     print(f"Summary results saved to: {summary_file}")
     
@@ -223,7 +231,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default="cache", help="Directory containing cached data")
     parser.add_argument("--k_min", type=int, required=True, help="Minimum number of clusters")
     parser.add_argument("--k_max", type=int, required=True, help="Maximum number of clusters")
-    parser.add_argument("--lambda_param", type=float, default=0.5, help="Weight between distance and fairness costs")
+    parser.add_argument("--lambda_param", type=float, required=True, help="Lambda parameter to evaluate")
     
     args = parser.parse_args()
     

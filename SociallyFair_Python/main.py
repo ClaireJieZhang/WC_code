@@ -74,8 +74,8 @@ def comp_cost(data, svar, k, clustering, is_fair):
 
         centers = find_centers(data, svar, k, clustering, is_fair)
 
-        costs[0] = kmeans_cost_s_c(data[g1], clustering[g1], centers, flag=1) / (size1 + 1e-8)
-        costs[1] = kmeans_cost_s_c(data[g2], clustering[g2], centers, flag=1) / (size2 + 1e-8)
+        #costs[0] = kmeans_cost_s_c(data[g1], clustering[g1], centers, flag=1) / (size1 + 1e-8)
+        #costs[1] = kmeans_cost_s_c(data[g2], clustering[g2], centers, flag=1) / (size2 + 1e-8)
 
     else:
         data1, data2 = data
@@ -88,9 +88,11 @@ def comp_cost(data, svar, k, clustering, is_fair):
             return np.array([np.nan, np.nan])
 
         centers = find_centers(data, svar, k, clustering, is_fair)
+        costs[0] = kmeans_cost_s_c(data1, clustering1, centers, flag=1, verbose_cost=True, group_id=0) / (size1 + 1e-8)
+        costs[1] = kmeans_cost_s_c(data2, clustering2, centers, flag=1, verbose_cost=True, group_id=1) / (size2 + 1e-8)
 
-        costs[0] = kmeans_cost_s_c(data1, clustering1, centers, flag=1) / (size1 + 1e-8)
-        costs[1] = kmeans_cost_s_c(data2, clustering2, centers, flag=1) / (size2 + 1e-8)
+        #costs[0] = kmeans_cost_s_c(data1, clustering1, centers, flag=1) / (size1 + 1e-8)
+        #costs[1] = kmeans_cost_s_c(data2, clustering2, centers, flag=1) / (size2 + 1e-8)
 
     return costs
 
@@ -265,8 +267,7 @@ def lloyd(data, svar, k, num_iters, best_out_of, rand_centers, is_fair, verbose=
 
 
 
-
-def find_clustering(data, ns, centers, is_last, is_fair):
+def find_clustering(data, ns, centers, is_last, is_fair, verbose=False):
     """
     Assign points to clusters based on closest center.
     Prevents empty clusters if is_last == False.
@@ -294,6 +295,9 @@ def find_clustering(data, ns, centers, is_last, is_fair):
     if is_fair == 0:
         cluster_idx = cluster_temp.copy()
 
+        if verbose:
+            print("Assigned clusters (standard):", np.unique(cluster_idx, return_counts=True))
+
         # Fix empty clusters if not last iteration
         if not is_last:
             clus_num = np.array([np.sum(cluster_idx == i) for i in range(k)])
@@ -314,12 +318,17 @@ def find_clustering(data, ns, centers, is_last, is_fair):
         cluster_idx1 = cluster_temp[:n1].copy()
         cluster_idx2 = cluster_temp[n1:].copy()
 
+        if verbose:
+            print("Assigned clusters (fair):")
+            print("  Group 1:", np.unique(cluster_idx1, return_counts=True))
+            print("  Group 2:", np.unique(cluster_idx2, return_counts=True))
+
         if not is_last:
             clus_num = np.array([np.sum(cluster_temp == i) for i in range(k)])
-            sorted_indices = np.argsort(np.sum((data - centers[i]) ** 2, axis=1))
 
             for i in range(k):
                 if clus_num[i] == 0:
+                    sorted_indices = np.argsort(np.sum((data - centers[i]) ** 2, axis=1))
                     for j in sorted_indices:
                         if j < n1:
                             temp = cluster_idx1[j]
@@ -337,9 +346,7 @@ def find_clustering(data, ns, centers, is_last, is_fair):
                                 cluster_idx2[j - n1] = i
                             break
 
-    
         return [cluster_idx1, cluster_idx2]
-
 
 
 
@@ -374,7 +381,7 @@ def normalize_data(X):
 
 
   
-
+'''
 def kmeans_cost_s_c(data, clustering, centers, flag=0):
     """
     Compute k-means clustering cost given data, clustering, and centers.
@@ -416,6 +423,61 @@ def kmeans_cost_s_c(data, clustering, centers, flag=0):
 
     return cost
 
+'''
+
+def kmeans_cost_s_c(data, clustering, centers, flag=0, verbose_cost=True, group_id=None):
+    """
+    Compute k-means clustering cost given data, clustering, and centers.
+    Prints detailed information about cluster assignment counts during cost computation.
+
+    Parameters:
+    - data: (n_samples, n_features) array
+    - clustering: 1D array (n_samples,) of cluster assignments
+    - centers: (k, n_features) array
+    - flag: cost computation mode
+    - verbose_cost: if True, print detailed cluster stats
+    - group_id: optional int, group ID (for fair clustering debug prints)
+    """
+    k = centers.shape[0]
+    n = data.shape[0]
+    cost = 0.0
+
+    if verbose_cost:
+        print(f"\n[DEBUG] Inside kmeans_cost_s_c: n_points={n}, n_clusters={k}")
+        unique, counts = np.unique(clustering, return_counts=True)
+        cluster_distribution = dict(zip(unique, counts))
+        print(f"[DEBUG] Cluster counts BEFORE cost computation: {cluster_distribution}")
+        print(f"[DEBUG] Proportions: {[count/n for count in counts]}")
+
+    for i in range(k):
+        mask = (clustering == i)
+
+        if verbose_cost:
+            print(f"[DEBUG] Cluster {i}: {np.sum(mask)} points assigned")
+
+        if np.sum(mask) == 0:
+            if verbose_cost:
+                if group_id is not None:
+                    print(f"⚠️ Group {group_id}: Cluster {i} is empty during cost computation. Skipping.")
+                else:
+                    print(f"⚠️ Cluster {i} is empty during cost computation. Skipping.")
+            continue  # Skip empty clusters
+
+        cluster_points = data[mask]
+        cluster_size = cluster_points.shape[0]
+
+        if flag == 0:
+            diffs = cluster_points - centers[i]
+            cluster_cost = np.sum(np.square(diffs))
+        else:
+            cluster_mean = np.mean(cluster_points, axis=0)
+            intra_var = np.sum(np.square(cluster_points - cluster_mean))
+            center_offset = cluster_size * np.linalg.norm(cluster_mean - centers[i])**2
+            cluster_cost = intra_var + center_offset
+
+        cost += cluster_cost
+
+    return cost
 
 
 
@@ -510,9 +572,134 @@ def naive_local_load_data(dataset_name):
     return data_all, svar_all, group_names
 
 
+def give_rand_centers_uniform_box(data, data_pf, data_n, k, best_out_of, seed=None):
+    """
+    Generate multiple sets of initial centers by uniformly sampling inside the bounding box of the data.
 
+    Args:
+        data: numpy array (n, d)
+        data_pf: numpy array (n, d)
+        data_n: numpy array (n, dp)
+        k: number of clusters
+        best_out_of: number of sets to generate
+        seed: random seed for reproducibility
 
- 
+    Returns:
+        rand_centers, rand_centers_pf, rand_centers_n
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    n, d = data.shape
+    dp = data_n.shape[1]
+
+    rand_centers = np.zeros((best_out_of, k, d))
+    rand_centers_pf = np.zeros((best_out_of, k, d))
+    rand_centers_n = np.zeros((best_out_of, k, dp))
+
+    data_min, data_max = np.min(data, axis=0), np.max(data, axis=0)
+    data_pf_min, data_pf_max = np.min(data_pf, axis=0), np.max(data_pf, axis=0)
+    data_n_min, data_n_max = np.min(data_n, axis=0), np.max(data_n, axis=0)
+
+    for i in range(best_out_of):
+        rand_centers[i] = np.random.uniform(low=data_min, high=data_max, size=(k, d))
+        rand_centers_pf[i] = np.random.uniform(low=data_pf_min, high=data_pf_max, size=(k, d))
+        rand_centers_n[i] = np.random.uniform(low=data_n_min, high=data_n_max, size=(k, dp))
+
+    return rand_centers, rand_centers_pf, rand_centers_n
+
+def give_rand_centers_kmeanspp(data, data_pf, data_n, k, best_out_of, seed=None):
+    """
+    Generate initial centers using a basic k-means++ seeding strategy.
+
+    Args:
+        data, data_pf, data_n: numpy arrays
+        k: number of clusters
+        best_out_of: how many random sets to generate
+        seed: random seed for reproducibility
+
+    Returns:
+        rand_centers, rand_centers_pf, rand_centers_n
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    n, d = data.shape
+    dp = data_n.shape[1]
+
+    rand_centers = np.zeros((best_out_of, k, d))
+    rand_centers_pf = np.zeros((best_out_of, k, d))
+    rand_centers_n = np.zeros((best_out_of, k, dp))
+
+    def kmeanspp_init(X, k):
+        centers = []
+        centers.append(X[np.random.choice(len(X))])
+
+        for _ in range(1, k):
+            dists = np.min([np.sum((X - c) ** 2, axis=1) for c in centers], axis=0)
+            probs = dists / np.sum(dists)
+            cumulative_probs = np.cumsum(probs)
+            r = np.random.rand()
+            index = np.searchsorted(cumulative_probs, r)
+            centers.append(X[index])
+        return np.array(centers)
+
+    for i in range(best_out_of):
+        rand_centers[i] = kmeanspp_init(data, k)
+        rand_centers_pf[i] = kmeanspp_init(data_pf, k)
+        rand_centers_n[i] = kmeanspp_init(data_n, k)
+
+    return rand_centers, rand_centers_pf, rand_centers_n
+
+def give_fixed_centers_synthetic(data, data_pf, data_n, k, best_out_of, R=5, r=1, D=10, normalize=True):
+    """
+    Hard-coded initialization for synthetic dataset with two regions (upper/lower).
+    
+    Args:
+        data: full raw data (only used if normalize=True)
+        data_pf: ignored
+        data_n: ignored
+        k: number of clusters (must be 4)
+        best_out_of: ignored (only generate 1 initialization)
+        R: spread between red and blue centers in upper region
+        r: spread between red and blue centers in lower region
+        D: vertical distance between regions
+        normalize: whether to apply normalization to centers (based on data)
+    
+    Returns:
+        rand_centers: (1, 4, 2) array
+        rand_centers_pf: dummy (same)
+        rand_centers_n: dummy (same)
+    """
+
+    if k != 4:
+        raise ValueError("Fixed synthetic initialization assumes k=4 for this setup.")
+
+    # Define hardcoded centers
+    centers = np.array([
+        [-R, D],  # Red cluster in Region 1
+        [R, D],   # Blue cluster in Region 1
+        [-r, 0],  # Red cluster in Region 2
+        [r, 0]    # Blue cluster in Region 2
+    ])
+
+    rand_centers = centers[None, :, :]  # Shape (1, 4, 2)
+
+    if normalize:
+        # Normalize the centers based on mean and std of data
+        means = np.mean(data, axis=0)
+        stds = np.std(data, axis=0)
+        keep = stds != 0
+
+        rand_centers_norm = np.zeros_like(rand_centers)
+        for i in range(rand_centers.shape[0]):  # Here only 1
+            rand_centers_norm[i] = (rand_centers[i] - means[keep]) / stds[keep]
+
+        return rand_centers_norm, rand_centers_norm, rand_centers_norm
+
+    else:
+        return rand_centers, rand_centers, rand_centers
+
 
 def pre_process_education_vector(vec):
     """
@@ -529,7 +716,7 @@ def pre_process_education_vector(vec):
 
 
 
-def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=False):
+def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=False, init_method="naive"):
     np.random.seed(12345)
     data_all, svar_all, group_names = naive_local_load_data(dataset_name)
     data_normalized = normalize_data(data_all)
@@ -545,9 +732,15 @@ def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=Fal
     for k in range(k_min, k_max + 1):
         if verbose:
             print(f"\n=== k = {k} ===")
-        rand_centers, _, _ = give_rand_centers(
-            data_normalized, data_normalized, data_normalized, k, best_out_of
-        )
+        if init_method == "naive":
+            rand_centers, _, _ = give_rand_centers(data_normalized, data_normalized, data_normalized, k, best_out_of)
+        elif init_method == "uniform_box":
+            rand_centers, _, _ = give_rand_centers_uniform_box(data_normalized, data_normalized, data_normalized, k, best_out_of)
+        elif init_method == "kmeanspp":
+            rand_centers, _, _ = give_rand_centers_kmeanspp(data_normalized, data_normalized, data_normalized, k, best_out_of)
+        else:
+            raise ValueError(f"Unknown initialization method: {init_method}")
+
 
         # Unfair Lloyd
         centers, clustering, runtime = lloyd(
@@ -598,11 +791,13 @@ def run_sf_pipeline_with_loaded_data(
     k_max=15,
     num_iters=10,
     best_out_of=10,
-    verbose=False
+    verbose=False,
+    init_method="naive",
+    normalize_data_flag=True
 ):
     """
     Run Fair-Lloyd pipeline using pre-loaded data and group labels.
-    Saves results as in original run_pipeline.
+    Now supports optionally skipping normalization (for synthetic datasets).
     """
 
     print("[DEBUG] unique group labels:", np.unique(svar_all, return_counts=True))
@@ -610,30 +805,56 @@ def run_sf_pipeline_with_loaded_data(
     print("[DEBUG] svar_all dtype:", svar_all.dtype)
     print("[DEBUG] svar_all unique values:", np.unique(svar_all))
 
-    data_normalized = normalize_data(data_all)
+    # Decide whether to normalize
+    if normalize_data_flag:
+        data_processed = normalize_data(data_all)
+    else:
+        data_processed = data_all.copy()
+
     results = defaultdict(dict)
 
     for k in range(k_min, k_max + 1):
         if verbose:
             print(f"\n=== k = {k} ===")
 
-        rand_centers, _, _ = give_rand_centers(
-            data_normalized, data_normalized, data_normalized, k, best_out_of
-        )
+        # === Check if fixed_synthetic is allowed ===
+        if init_method == "fixed_synthetic":
+            if k != 4:
+                raise ValueError(f"Fixed synthetic initialization is designed for k=4 only. You requested k={k}.")
+            # You can add more safety checks here if needed, e.g., dimensions
 
+        # === Initialize centers ===
+        if init_method == "naive":
+            rand_centers, _, _ = give_rand_centers(data_processed, data_processed, data_processed, k, best_out_of)
+        elif init_method == "uniform_box":
+            rand_centers, _, _ = give_rand_centers_uniform_box(data_processed, data_processed, data_processed, k, best_out_of)
+        elif init_method == "kmeanspp":
+            rand_centers, _, _ = give_rand_centers_kmeanspp(data_processed, data_processed, data_processed, k, best_out_of)
+        elif init_method == "fixed_synthetic":
+            rand_centers, _, _ = give_fixed_centers_synthetic(
+                data_all, data_all, data_all,
+                k, best_out_of,
+                normalize=normalize_data_flag
+            )
+        else:
+            raise ValueError(f"Unknown initialization method: {init_method}")
+
+        # === Unfair Lloyd ===
         centers, clustering, runtime = lloyd(
-            data_normalized, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=0, verbose=verbose
+            data_processed, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=0, verbose=verbose
         )
-        cost = comp_cost(data_normalized, svar_all, k, clustering, is_fair=0)
+        cost = comp_cost(data_processed, svar_all, k, clustering, is_fair=0)
 
+        # === Fair Lloyd ===
         centers_f, clustering_f, runtime_f = lloyd(
-            data_normalized, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=1, verbose=verbose
+            data_processed, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=1, verbose=verbose
         )
         cost_f = comp_cost(
-            [data_normalized[svar_all == 0], data_normalized[svar_all == 1]],
+            [data_processed[svar_all == 0], data_processed[svar_all == 1]],
             svar_all, k, clustering_f, is_fair=1
         )
 
+        # === Save Results ===
         assignment = np.empty_like(svar_all)
         assignment[svar_all == 0] = clustering_f[0]
         assignment[svar_all == 1] = clustering_f[1]
@@ -656,6 +877,7 @@ def run_sf_pipeline_with_loaded_data(
 
     print(f"\n✅ Results saved to: {out_path}")
     return results
+
 
 
 if __name__ == "__main__":

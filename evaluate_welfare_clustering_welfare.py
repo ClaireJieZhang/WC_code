@@ -6,16 +6,21 @@ import configparser
 import ast
 from evaluation_utils.welfare_evaluation import evaluate_welfare_cost_with_slack
 
-def load_welfare_clustering_results(cache_dir, k):
-    """Load Welfare Clustering results from the most recent JSON file."""
+def load_welfare_clustering_results(cache_dir, k, lambda_param):
+    """Load Welfare Clustering results from the JSON file with matching lambda."""
     results_dir = os.path.join(cache_dir, "welfare_clustering_results")
-    json_file = os.path.join(results_dir, f"detailed_results_k{k}.json")
+    lambda_str = f"lambda_{str(lambda_param).replace('.', '_')}"
+    json_file = os.path.join(results_dir, f"detailed_results_k{k}_{lambda_str}.json")
     
     if not os.path.exists(json_file):
-        raise FileNotFoundError(f"No results file found for k={k}")
+        raise FileNotFoundError(f"No results file found for k={k} and lambda={lambda_param}")
         
     with open(json_file, 'r') as f:
         results = json.load(f)
+    
+    # Verify lambda value matches
+    if abs(results.get('lambda_param', 0) - lambda_param) > 1e-6:
+        raise ValueError(f"Lambda mismatch in results file. Expected {lambda_param}, found {results.get('lambda_param')}")
         
     # The results are nested under results[str(k)]['fair']
     k_str = str(k)
@@ -69,16 +74,16 @@ def evaluate_welfare_clustering_costs(cache_dir, k, lambda_param):
     alpha, beta = load_alpha_beta_from_config(config_file)
     
     # Load results
-    results = load_welfare_clustering_results(cache_dir, k)
+    results = load_welfare_clustering_results(cache_dir, k, lambda_param)
     centers = np.array(results['centers'])
     assignment = results['assignment']
     
-    # Convert binary assignment matrix to cluster indices
+    # Convert binary assignment matrix to indices if needed
     if len(assignment.shape) > 1:  # If it's a binary matrix
         assignment = np.argmax(assignment, axis=1)
     
     # Print dimensions for debugging
-    print(f"\nData dimensions for k={k}:")
+    print(f"\nData dimensions for k={k}, lambda={lambda_param}:")
     print(f"data_matrix shape: {data_matrix.shape}")
     print(f"group_labels shape: {group_labels.shape}")
     print(f"centers shape: {centers.shape}")
@@ -116,7 +121,7 @@ def evaluate_welfare_clustering_costs(cache_dir, k, lambda_param):
 
 def evaluate_welfare_clustering_costs_range(cache_dir, k_min, k_max, lambda_param):
     """Evaluate Welfare Clustering costs for a range of k values."""
-    print(f"Evaluating Welfare Clustering costs for k from {k_min} to {k_max}")
+    print(f"Evaluating Welfare Clustering costs for k from {k_min} to {k_max} with lambda={lambda_param}")
     
     # Initialize list to store results
     all_results = []
@@ -139,15 +144,22 @@ def evaluate_welfare_clustering_costs_range(cache_dir, k_min, k_max, lambda_para
         except Exception as e:
             print(f"Error evaluating k={k}: {str(e)}")
     
-    # Convert to DataFrame and save detailed results
+    # Create welfare_evaluation directory if it doesn't exist
     results_dir = os.path.join(cache_dir, "welfare_evaluation")
     os.makedirs(results_dir, exist_ok=True)
+    
+    if not all_results:
+        print("No results were successfully evaluated")
+        return None
     
     # Convert numpy types to Python native types for JSON serialization
     serializable_results = convert_to_serializable(all_results)
     
+    # Include lambda in output filenames
+    lambda_str = f"lambda_{str(lambda_param).replace('.', '_')}"
+    
     # Save full results with cluster statistics
-    output_file = os.path.join(results_dir, f"welfare_clustering_all_k{k_min}_to_{k_max}_detailed.json")
+    output_file = os.path.join(results_dir, f"welfare_clustering_all_k{k_min}_to_{k_max}_{lambda_str}_detailed.json")
     with open(output_file, 'w') as f:
         json.dump(serializable_results, f, indent=2)
     print(f"\nDetailed results saved to: {output_file}")
@@ -182,7 +194,7 @@ def evaluate_welfare_clustering_costs_range(cache_dir, k_min, k_max, lambda_para
         summary_results.append(summary_row)
     
     df_summary = pd.DataFrame(summary_results)
-    summary_file = os.path.join(results_dir, f"welfare_clustering_all_k{k_min}_to_{k_max}_summary.csv")
+    summary_file = os.path.join(results_dir, f"welfare_clustering_all_k{k_min}_to_{k_max}_{lambda_str}_summary.csv")
     df_summary.to_csv(summary_file, index=False)
     print(f"Summary results saved to: {summary_file}")
     
@@ -195,7 +207,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default="cache", help="Directory containing cached data")
     parser.add_argument("--k_min", type=int, required=True, help="Minimum number of clusters")
     parser.add_argument("--k_max", type=int, required=True, help="Maximum number of clusters")
-    parser.add_argument("--lambda_param", type=float, required=True, help="Weight between distance and fairness costs")
+    parser.add_argument("--lambda_param", type=float, required=True, help="Lambda parameter to evaluate")
     
     args = parser.parse_args()
     

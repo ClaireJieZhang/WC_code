@@ -95,6 +95,116 @@ def comp_cost(data, svar, k, clustering, is_fair):
 
 
 
+def hardcoded_initialization(X, k, R=5, r=1, D=10, normalize=True):
+    """
+    Hardcoded initialization for synthetic dataset with two regions (upper/lower).
+
+    Args:
+        X: (n, d) array — input data
+        k: int — number of clusters (must be 4 for this synthetic setup)
+        R: spread between red/blue centers in upper region
+        r: spread between red/blue centers in lower region
+        D: vertical separation between regions
+        normalize: whether to normalize centers based on dataset X
+
+    Returns:
+        centers: (k, d) array of initialized cluster centers
+    """
+    if k != 4:
+        raise ValueError("Hardcoded synthetic initialization expects k=4.")
+
+    # Define hard-coded centers
+    centers = np.array([
+        [-R, D],  # Red cluster in Region 1 (upper)
+        [R, D],   # Blue cluster in Region 1 (upper)
+        [-r, 0],  # Red cluster in Region 2 (lower)
+        [r, 0]    # Blue cluster in Region 2 (lower)
+    ])  # Shape (4, 2)
+
+    if normalize:
+        means = np.mean(X, axis=0)
+        stds = np.std(X, axis=0)
+        keep = stds != 0  # Only normalize dimensions with nonzero std
+
+        centers_norm = np.zeros_like(centers)
+        centers_norm[:, keep] = (centers[:, keep] - means[keep]) / stds[keep]
+        return centers_norm
+    else:
+        return centers
+
+
+def uniform_box_initialization(X, k):
+    """
+    Initialize centers uniformly inside the bounding box of the data.
+
+    Args:
+        X: (n, d) numpy array
+        k: number of clusters
+
+    Returns:
+        centers: (k, d) numpy array
+    """
+    n, d = X.shape
+    min_vals = np.min(X, axis=0)
+    max_vals = np.max(X, axis=0)
+
+    centers = np.random.uniform(low=min_vals, high=max_vals, size=(k, d))
+    return centers
+
+
+def kmeans_plus_plus_initialization(X, k, num_trials=10):
+    """
+    k-means++ initialization with multiple trials to select the best centers.
+
+    Args:
+        X: (n, d) numpy array
+        k: number of clusters
+        num_trials: number of times to run k-means++ initialization
+
+    Returns:
+        centers: (k, d) numpy array - best set of centers found
+    """
+    n, d = X.shape
+    best_centers = None
+    best_cost = float('inf')
+
+    for _ in range(num_trials):
+        # Initialize centers for this trial
+        centers = np.zeros((k, d))
+        indices = []
+
+        # 1. Choose the first center randomly
+        first_idx = np.random.choice(n)
+        centers[0] = X[first_idx]
+        indices.append(first_idx)
+
+        # 2. Choose the next centers
+        for i in range(1, k):
+            dists = np.min(
+                np.linalg.norm(X[:, np.newaxis] - centers[np.newaxis, :i], axis=2) ** 2,
+                axis=1
+            )
+            probs = dists / np.sum(dists)
+            next_idx = np.random.choice(n, p=probs)
+            centers[i] = X[next_idx]
+            indices.append(next_idx)
+
+        # Calculate initial cost for this set of centers
+        distances = np.min(
+            np.linalg.norm(X[:, np.newaxis] - centers[np.newaxis, :], axis=2) ** 2,
+            axis=1
+        )
+        cost = np.sum(distances)
+
+        # Update best centers if this is better
+        if cost < best_cost:
+            best_cost = cost
+            best_centers = centers.copy()
+
+    return best_centers
+
+
+
 
 
 
@@ -276,7 +386,8 @@ def find_clustering(data, ns, centers, is_last, is_fair, verbose=False):
     if is_fair == 0:
         cluster_idx = cluster_temp.copy()
 
-        print("Assigned clusters (standard):", np.unique(cluster_idx, return_counts=True))
+        if verbose:
+            print("Assigned clusters (standard):", np.unique(cluster_idx, return_counts=True))
 
         # Fix empty clusters if not last iteration
         if not is_last:
@@ -305,10 +416,10 @@ def find_clustering(data, ns, centers, is_last, is_fair, verbose=False):
 
         if not is_last:
             clus_num = np.array([np.sum(cluster_temp == i) for i in range(k)])
-            sorted_indices = np.argsort(np.sum((data - centers[i]) ** 2, axis=1))
 
             for i in range(k):
                 if clus_num[i] == 0:
+                    sorted_indices = np.argsort(np.sum((data - centers[i]) ** 2, axis=1))
                     for j in sorted_indices:
                         if j < n1:
                             temp = cluster_idx1[j]
@@ -321,13 +432,13 @@ def find_clustering(data, ns, centers, is_last, is_fair, verbose=False):
                             clus_num[i] += 1
                             clus_num[temp] -= 1
                             if tempi == 1:
-                                
                                 cluster_idx1[j] = i
                             else:
                                 cluster_idx2[j - n1] = i
                             break
 
         return [cluster_idx1, cluster_idx2]
+
 
 
 
@@ -450,90 +561,6 @@ def b_search(deltaA, deltaB, alphaA, alphaB, l, tol=1e-10, max_iter=64):
 
 
 
-
-def load_data(dataset_name):
-    """
-    Load dataset features and sensitive attribute for fairness-aware clustering.
-
-    Parameters:
-    - dataset_name: one of {'credit', 'adult', 'LFW', 'compasWB'}
-
-    Returns:
-    - data_all: numpy array of shape (n_samples, n_features)
-    - svar_all: numpy array of sensitive attributes (values: 1 or 2)
-    - group_names: list of group name strings
-    """
-    if dataset_name == 'credit':
-        data_all = np.loadtxt('../Data/credit/credit_degree.csv', delimiter=',', skiprows=2, usecols=range(1, None))
-        svar_temp = np.loadtxt('../Data/credit/educationAttribute.csv')
-        svar_all = pre_process_education_vector(svar_temp).astype(int)
-        group_names = ['Higher Education', 'Lower Education']
-
-    elif dataset_name == 'adult':
-       
-        X, y = fetch_adult(as_frame=True, return_X_y=True)
-
-        # Drop rows with any missing entries *before* encoding
-        X_clean = X.replace('?', np.nan).dropna()
-
-        # Also drop corresponding labels
-        y_clean = y.loc[X_clean.index]
-
-        # Convert target to binary
-        y_binary = (y_clean == '>50K').astype(int)
-        X_clean['target'] = y_binary
-
-        # Extract and drop sensitive attribute
-        sensitive = X_clean['sex']
-        X_clean = X_clean.drop(columns=['sex'])
-
-        print("First 5 rows of X_clean (after dropna):")
-        print(X_clean.head())
-
-        print("Unique values per column (before encoding):")
-        for col in X_clean.columns:
-            print(f"{col}: {X_clean[col].unique()}")
-
-        # Ordinal encode all features
-        enc = OrdinalEncoder()
-        X_encoded = enc.fit_transform(X_clean)
-
-        print("First 5 encoded rows:")
-        print(X_encoded[:5])    
-
-
-
-        data_all = X_encoded
-        svar_all = (sensitive == 'Male').astype(int) +1   # 1 = Female, 2 = Male
-
-        print("Any NaNs in data_all?", np.isnan(data_all).any())  # should be False
-
-        group_names = ['Female', 'Male']
-
-
-    elif dataset_name == 'LFW':
-        mat_data = loadmat('../Data/LFW/LFW.mat')
-        data_all = mat_data['data']
-        svar_all = mat_data['sensitive'].flatten()
-        group_names = ['Female', 'Male']
-
-    elif dataset_name == 'compasWB':
-        mat_data = loadmat('../Data/compas/compas-data.mat')
-        race = mat_data['svarRace'].flatten()
-        mask = (race == 1) | (race == 3)
-        data_all = mat_data['dataCompas'][mask]
-        svar_all = ((race[mask] - 1) // 2 + 1).astype(int)
-        race_names = [str(r[0]) if isinstance(r, np.ndarray) else r for r in mat_data['raceNames'][0]]
-        group_names = [race_names[0], race_names[2]]
-
-    else:
-        raise ValueError(f"Unknown dataset: {dataset_name}")
-
-    return data_all, svar_all, group_names
-
-
-
-
  
 
 def pre_process_education_vector(vec):
@@ -549,87 +576,6 @@ def pre_process_education_vector(vec):
 
 
 
-
-
-def run_pipeline(dataset_name, k_min, k_max, num_iters, best_out_of, verbose=False):
-    np.random.seed(12345)
-    data_all, svar_all, group_names = load_data(dataset_name)
-    data_normalized = normalize_data(data_all)
-    print("First 5 normalized rows:")
-    print(data_normalized[:5])
-
-
-    print("Any NaNs in data_normalized?", np.isnan(data_normalized).any())
-
-
-    results = defaultdict(dict)
-
-    for k in range(k_min, k_max + 1):
-        if verbose:
-            print(f"\n=== k = {k} ===")
-        rand_centers, _, _ = give_rand_centers(
-            data_normalized, data_normalized, data_normalized, k, best_out_of
-        )
-
-        # Unfair Lloyd
-        centers, clustering, runtime = lloyd(
-            data_normalized, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=0, verbose=verbose
-        )
-
-        cost = comp_cost(data_normalized, svar_all, k, clustering, is_fair=0)
-
-        results[k]['centers'] = centers
-        results[k]['clustering'] = clustering
-        results[k]['runtime'] = runtime
-        results[k]['cost'] = cost
-
-        # Fair Lloyd
-        centers_f, clustering_f, runtime_f = lloyd(
-            data_normalized, svar_all, k, num_iters, best_out_of, rand_centers, is_fair=1, verbose=verbose
-        )
-
-        cost_f = comp_cost(
-            [data_normalized[svar_all == 1], data_normalized[svar_all == 2]],
-            svar_all, k, clustering_f, is_fair=1
-        )
-
-        results[k]['centers_f'] = centers_f
-        results[k]['clustering_f'] = clustering_f
-        results[k]['runtime_f'] = runtime_f
-        results[k]['cost_f'] = cost_f
-
-    os.makedirs("results", exist_ok=True)
-    out_path = f"results/{dataset_name}_k{k_min}-{k_max}_results.pkl"
-    with open(out_path, "wb") as f:
-        pickle.dump(results, f)
-
-    print(f"\n✅ Results saved to: {out_path}")
-    return results
-
-
-
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Fair-Lloyd clustering pipeline.")
-    parser.add_argument("--dataset", type=str, default="adult", choices=["adult", "credit", "LFW", "compasWB"],
-                        help="Dataset name to use.")
-    parser.add_argument("--k_min", type=int, default=4, help="Minimum number of clusters.")
-    parser.add_argument("--k_max", type=int, default=15, help="Maximum number of clusters.")
-    parser.add_argument("--iters", type=int, default=10, help="Number of Lloyd iterations.")
-    parser.add_argument("--best_out_of", type=int, default=10, help="Number of random initializations to try.")
-    parser.add_argument("--verbose", action="store_true", help="Print detailed progress logs.")
-
-    args = parser.parse_args()
-
-    results = run_pipeline(
-        dataset_name=args.dataset,
-        k_min=args.k_min,
-        k_max=args.k_max,
-        num_iters=args.iters,
-        best_out_of=args.best_out_of,
-        verbose=args.verbose
-    )
 
 def calculate_welfare_cost(centers, assignment, points, group_labels, lambda_param=0.5, p=2):
     """

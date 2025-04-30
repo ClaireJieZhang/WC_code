@@ -1,0 +1,2 @@
+k,lambda_param,objective,runtime,num_points,timestamp,alpha,beta
+7,0.0,1772439.711082714,,10000,2025-04-27T12:52:00.877196,"{0: 0.033, 1: 0.067}","{0: 0.033, 1: 0.067}"

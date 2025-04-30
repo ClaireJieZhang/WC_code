@@ -24,20 +24,24 @@ PIPELINES = {
     },
 }
 
-RESULTS_DIR = 'cache/welfare_evaluation'  # Change if needed
-DEFAULT_SAVE_DIR = 'plots'
 
-
-def load_detailed_results(pipeline_key, k_min, k_max):
+def load_detailed_results(pipeline_key, k_min, k_max, results_dir):
     pattern = PIPELINES[pipeline_key]['json_pattern']
-    path = os.path.join(RESULTS_DIR, pattern.format(k_min, k_max))
-    with open(path, 'r') as f:
-        return json.load(f)
+    path = os.path.join(results_dir, 'welfare_evaluation', pattern.format(k_min, k_max))
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: Could not find file: {path}")
+        return None
 
 
-def ensure_save_dir(save_dir):
-    if not save_dir:
-        save_dir = DEFAULT_SAVE_DIR
+def ensure_save_dir(base_dir, lambda_param=None):
+    """Create and return the plots directory path"""
+    save_dir = os.path.join(base_dir, 'plots')
+    if lambda_param is not None:
+        lambda_str = f"lambda_{str(lambda_param).replace('.', '_')}"
+        save_dir = os.path.join(save_dir, lambda_str)
     os.makedirs(save_dir, exist_ok=True)
     return save_dir
 
@@ -268,26 +272,105 @@ def main():
     parser = argparse.ArgumentParser(description="Visualize group proportions, distance costs, and violations for clustering pipelines.")
     parser.add_argument('--k_min', type=int, required=True)
     parser.add_argument('--k_max', type=int, required=True)
-    parser.add_argument('--save_dir', type=str, default=None, help='Directory to save plots (optional)')
+    parser.add_argument('--results_dir', type=str, required=True, 
+                       help='Base directory containing welfare_evaluation folder with results')
     parser.add_argument('--group_names', type=str, default=None, help='Optional JSON file mapping group ids to names')
+    parser.add_argument('--lambda_param', type=float, default=None, help='Optional lambda value (for saving folder)')
     args = parser.parse_args()
 
+    # Verify results directory and welfare_evaluation subdirectory exist
+    if not os.path.isdir(args.results_dir):
+        raise ValueError(f"Results directory '{args.results_dir}' does not exist")
+    welfare_eval_dir = os.path.join(args.results_dir, 'welfare_evaluation')
+    if not os.path.isdir(welfare_eval_dir):
+        raise ValueError(f"Welfare evaluation directory '{welfare_eval_dir}' does not exist")
+    
     group_names = None
     if args.group_names:
         with open(args.group_names, 'r') as f:
             group_names = json.load(f)
 
+    # Set up save directory within results_dir
+    save_dir = ensure_save_dir(args.results_dir, args.lambda_param)
+    print(f"Plots will be saved in: {save_dir}")
+
+    all_results = {}
     for key, info in PIPELINES.items():
         print(f"\n--- {info['name']} ---")
-        results = load_detailed_results(key, args.k_min, args.k_max)
-        # Plot group proportions for all k
-        for k in range(args.k_min, args.k_max+1):
-            plot_group_proportions(results, info['name'], k, group_names, args.save_dir)
-            plot_group_violations(results, info['name'], k, group_names, args.save_dir)
-        # Plot group distance costs for all k
-        plot_group_distance_costs(results, info['name'], group_names, args.save_dir)
-        # Plot k vs. per-group violation
-        plot_k_vs_group_violation(results, info['name'], group_names, args.save_dir)
+        results = load_detailed_results(key, args.k_min, args.k_max, args.results_dir)
+        if results is not None:
+            all_results[key] = results
+            for k in range(args.k_min, args.k_max+1):
+                plot_group_proportions(results, info['name'], k, group_names, save_dir)
+                plot_group_violations(results, info['name'], k, group_names, save_dir)
+            plot_group_distance_costs(results, info['name'], group_names, save_dir)
+            plot_k_vs_group_violation(results, info['name'], group_names, save_dir)
+
+    if all_results:
+        plot_summary_comparison(all_results, save_dir)
+    else:
+        print("No results were loaded successfully. Check the results directory and file patterns.")
+
+
+def plot_summary_comparison(all_results_dict, save_dir):
+    os.makedirs(save_dir, exist_ok=True)
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+
+    for idx, (key, info) in enumerate(PIPELINES.items()):
+        results = all_results_dict[key]
+        k_values = sorted(set(int(r['k']) for r in results))
+        groups = sorted(set(g for r in results for g in r['group_distance_costs'].keys()), key=str)
+
+        # Plot distance costs
+        group_costs = {g: [] for g in groups}
+        for k in k_values:
+            k_results = [r for r in results if int(r['k']) == k]
+            r = k_results[0]
+            for g in groups:
+                group_costs[g].append(r['group_distance_costs'].get(g, np.nan))
+
+        for g in groups:
+            axes[0, idx].plot(k_values, group_costs[g], marker='o', label=f'Group {g}')
+        axes[0, idx].set_title(f"{info['name']}\nAvg Distance Cost")
+        axes[0, idx].set_xlabel("k")
+        axes[0, idx].set_ylabel("Distance Cost")
+        axes[0, idx].legend()
+
+        # Plot fairness violations
+        group_violations = {g: [] for g in groups}
+        for k in k_values:
+            k_results = [r for r in results if int(r['k']) == k]
+            r = k_results[0]
+            cluster_stats = r['cluster_stats']
+            clusters = sorted(cluster_stats.keys(), key=int)
+            group_sizes = {g: 0 for g in groups}
+            group_total_violation = {g: 0.0 for g in groups}
+            for ci, cluster_id in enumerate(clusters):
+                cluster_size = cluster_stats[cluster_id]['size']
+                for g in groups:
+                    group_prop = cluster_stats[cluster_id]['group_proportions'].get(g, 0)
+                    violation = cluster_stats[cluster_id]['violations'].get(g, 0)
+                    group_sizes[g] += group_prop * cluster_size
+                    group_total_violation[g] += violation * cluster_size
+            for g in groups:
+                if group_sizes[g] > 0:
+                    group_violations[g].append(group_total_violation[g] / group_sizes[g])
+                else:
+                    group_violations[g].append(np.nan)
+
+        for g in groups:
+            axes[1, idx].plot(k_values, group_violations[g], marker='x', label=f'Group {g}')
+        axes[1, idx].set_title(f"{info['name']}\nFairness Violation")
+        axes[1, idx].set_xlabel("k")
+        axes[1, idx].set_ylabel("Violation")
+        axes[1, idx].legend()
+
+    plt.tight_layout()
+    fname = os.path.join(save_dir, "summary_group_costs_and_violations.png")
+    plt.savefig(fname)
+    print(f"[SAVED] {fname}")
+    plt.close()
+
 
 if __name__ == '__main__':
     main() 

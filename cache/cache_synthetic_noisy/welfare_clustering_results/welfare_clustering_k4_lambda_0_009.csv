@@ -1,0 +1,2 @@
+k,lambda_param,objective,runtime,num_points,timestamp,alpha,beta,init_method
+4,0.009000000000000001,672.5754154888991,,80,2025-04-30T10:24:09.855312,"{0: 0.3, 1: 0.3}","{0: 0.3, 1: 0.3}",kmeanspp
